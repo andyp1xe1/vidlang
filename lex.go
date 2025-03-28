@@ -60,6 +60,7 @@ const (
 	// literals
 	itemNumber
 	itemString
+	itemBool // TODO
 
 	// delimiters
 	itemComma
@@ -79,6 +80,7 @@ const (
 	itemContrast
 	itemCrossfade
 	itemCut
+	itemExport
 	itemFade
 	itemHue
 	itemMap
@@ -89,6 +91,40 @@ const (
 	itemTrackLine
 	itemVolume
 )
+
+func (i itemType) String() string {
+	switch i {
+	case itemEOF:
+		return "EOF"
+	case itemError:
+		return "error"
+	case itemIdentifier:
+		return "identifier"
+	case itemString, itemNumber, itemBool:
+		return "literal"
+	case itemComment:
+		return "comment"
+	case itemNewline:
+		return "newline"
+	default:
+		for k, v := range commands {
+			if v == i {
+				return k
+			}
+		}
+		for k, v := range runeKeywords {
+			if v == i {
+				return string(k)
+			}
+		}
+		for k, v := range strOperators {
+			if v == i {
+				return k
+			}
+		}
+		return "unknown"
+	}
+}
 
 const globalStream = "stream"
 const selfStar = "*"
@@ -110,6 +146,15 @@ var runeKeywords = map[rune]itemType{
 	'=': itemAssign,
 }
 
+var mathSymbols = map[string]itemType{
+	"*": itemMult,
+	"+": itemPlus,
+	"-": itemMinus,
+	"/": itemDiv,
+	"(": itemLeftParen,
+	")": itemRightParen,
+}
+
 var strOperators = map[string]itemType{
 	":=": itemDeclare,
 	"|>": itemPipe,
@@ -127,6 +172,7 @@ var commands = map[string]itemType{
 	"contrast":   itemContrast,
 	"crossfade":  itemCrossfade,
 	"cut":        itemCut,
+	"export":     itemExport,
 	"fade":       itemFade,
 	"hue":        itemHue,
 	"map":        itemMap,
