@@ -5,65 +5,65 @@ import "fmt"
 func PrintTree(n interface{}, indent string) {
 	switch node := n.(type) {
 
-	case nodeAssign:
+	case NodeAssign:
 		fmt.Printf("%sAssignment:\n", indent)
 		fmt.Printf("%sDest:\n", indent+"  ")
 		// node.dest is a nodeList[nodeIdent]
-		for _, dest := range node.dest {
+		for _, dest := range node.Dest {
 			PrintTree(dest, indent+"    ")
 		}
 		fmt.Printf("%sValue:\n", indent+"  ")
-		PrintTree(node.value, indent+"    ")
+		PrintTree(node.Value, indent+"    ")
 
-	case nodeExprMath:
-		fmt.Printf("%sMath Expression: (Operator: %s)\n", indent, node.op)
+	case NodeExprMath:
+		fmt.Printf("%sMath Expression: (Operator: %s)\n", indent, node.Op)
 		fmt.Printf("%sLeft:\n", indent+"  ")
-		PrintTree(node.left, indent+"    ")
+		PrintTree(node.Left, indent+"    ")
 		fmt.Printf("%sRight:\n", indent+"  ")
-		PrintTree(node.right, indent+"    ")
+		PrintTree(node.Right, indent+"    ")
 
-	case nodeExpr:
+	case NodeExpr:
 		fmt.Printf("%sExpression:\n", indent)
-		if node.input != nil {
+		if node.Input != nil {
 			fmt.Printf("%sInput:\n", indent+"  ")
-			PrintTree(node.input, indent+"    ")
+			PrintTree(node.Input, indent+"    ")
 		}
-		if len(node.pipeline) > 0 {
+		if len(node.Pipeline) > 0 {
 			fmt.Printf("%sPipeline:\n", indent+"  ")
-			for i, cmd := range node.pipeline {
+			for i, cmd := range node.Pipeline {
 				fmt.Printf("%sCommand %d:\n", indent+"    ", i)
-				fmt.Printf("%s  Name: %s\n", indent+"      ", cmd.name)
-				if len(cmd.args) > 0 {
+				fmt.Printf("%s  Name: %s\n", indent+"      ", cmd.Name)
+				if len(cmd.Args) > 0 {
 					fmt.Printf("%s  Args:\n", indent+"      ")
-					for _, arg := range cmd.args {
+					for _, arg := range cmd.Args {
 						PrintTree(arg, indent+"        ")
 					}
 				}
 			}
 		}
 
-	case nodeSubExpr:
+	case NodeSubExpr:
 		fmt.Printf("%sSub-Expression:\n", indent)
 		fmt.Printf("%sParams:\n", indent+"  ")
-		for _, param := range node.params {
+		for _, param := range node.Params {
 			PrintTree(param, indent+"    ")
 		}
 		fmt.Printf("%sBody:\n", indent+"  ")
-		PrintTree(node.body, indent+"    ")
+		PrintTree(node.Body, indent+"    ")
 
-	case nodeList[nodeValue]:
+	case NodeList[NodeValue]:
 		fmt.Printf("%sList (length %d):\n", indent, len(node))
 		for _, item := range node {
 			PrintTree(item, indent+"  ")
 		}
 
 	// For literal values and identifiers
-	case nodeLiteralString, nodeLiteralNumber, nodeLiteralBool, nodeIdent, nodeSelfStar:
+	case NodeLiteralString, NodeLiteralNumber, NodeLiteralBool, NodeIdent, NodeSelfStar:
 		fmt.Printf("%s%v\n", indent, node)
 
 	default:
 		// If the node implements nodeValue, use its String method.
-		if nv, ok := n.(nodeValue); ok {
+		if nv, ok := n.(NodeValue); ok {
 			fmt.Printf("%s%s\n", indent, nv.String())
 		} else {
 			fmt.Printf("%sUnknown node: %#v\n", indent, n)

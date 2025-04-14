@@ -2,30 +2,23 @@ package parser
 
 import (
 	"fmt"
+	"log"
 	"strconv"
 )
 
-type identifier struct {
-	name string
-	typ  string
-}
-
 type Parser struct {
-	Expressions chan node
+	Expressions chan Node
 
 	lex       *lexer
 	currItem  item
 	peekItem  item
 	peek2Item item
-	identSet  map[string]*identifier // TODO: to keep track of identifiers
 }
 
 func Parse(input string) *Parser {
 	p := &Parser{
-		Expressions: make(chan node),
-
-		lex:      lex(input),
-		identSet: make(map[string]*identifier),
+		Expressions: make(chan Node),
+		lex:         lex(input),
 	}
 	p.currItem = <-p.lex.items
 	p.peekItem = <-p.lex.items
@@ -37,7 +30,9 @@ func Parse(input string) *Parser {
 // nextItem advances the Parser to the next token, and sets the peekItem
 func (p *Parser) nextItem() {
 	if p.currItem.typ == itemError {
-		p.errorf("lexical error: %s", p.currItem.val)
+		panic(NewAstError(
+			"lexical error: "+p.currItem.val,
+			p.currItem.line, p.currItem.pos))
 	}
 	p.currItem = p.peekItem
 	p.peekItem = p.peek2Item
@@ -46,11 +41,22 @@ func (p *Parser) nextItem() {
 }
 
 func (p *Parser) errorf(format string, args ...any) {
-	err := fmt.Errorf(format, args...)
-	panic(err)
+	panic(NewAstError(
+		fmt.Sprintf("syntax error: "+format, args...),
+		p.currItem.line, p.currItem.pos))
 }
 
 func (p *Parser) run() {
+	defer func() {
+		if r := recover(); r != nil {
+			switch val := r.(type) {
+			case AstError:
+				p.Expressions <- val
+			default:
+				log.Fatal(val)
+			}
+		}
+	}()
 
 	for i := 0; ; i++ {
 		p.nextItem()
@@ -59,7 +65,6 @@ func (p *Parser) run() {
 			close(p.Expressions)
 			return
 		case itemIdentifier:
-			// Check for assignment-like conditions
 			switch p.peekItem.typ {
 			case itemAssign, itemDeclare, itemComma:
 				p.Expressions <- p.parseAssignment()
@@ -72,6 +77,7 @@ func (p *Parser) run() {
 			if p.currItem.typ > itemCommand {
 				p.Expressions <- p.parseAssignable()
 			} else {
+				// idk
 			}
 		}
 	}
@@ -85,10 +91,10 @@ var validArgs = map[itemType]bool{
 	itemBool:       true,
 }
 
-func (p *Parser) parseCommand() nodeCommand {
-	var node nodeCommand
-	node.name = p.currItem.val
-	node.args = make([]nodeValue, 0)
+func (p *Parser) parseCommand() NodeCommand {
+	var node NodeCommand
+	node.Name = p.currItem.val
+	node.Args = make([]NodeValue, 0)
 	for validArgs[p.peekItem.typ] && p.peekItem.typ != itemNewline {
 		p.nextItem()
 		assert(
@@ -99,7 +105,7 @@ func (p *Parser) parseCommand() nodeCommand {
 			p.currItem.typ != itemNewline,
 			"parseCommand's loop should not process newlines",
 		)
-		node.args = append(node.args, p.parseValue())
+		node.Args = append(node.Args, p.parseValue())
 	}
 	return node
 }
@@ -122,12 +128,12 @@ var validValues = map[itemType]bool{
 // if a pipeline continues, parse it, adding the list or value as input
 // return the value
 // else if it's a command, parse the pipeline, form an expression, return it
-func (p *Parser) parseValue() nodeValue {
+func (p *Parser) parseValue() NodeValue {
 	assert(validValues[p.currItem.typ],
 		"parseValue should be invoked with currItem at a simple value, list or subexpression got %s",
 		p.currItem)
 
-	var n nodeValue
+	var n NodeValue
 
 	if p.currItem.typ == itemLeftBrace {
 		n = p.parseSimpleValueList()
@@ -145,12 +151,13 @@ func (p *Parser) parseValue() nodeValue {
 	return n
 }
 
-func (p *Parser) parseAssignable() nodeValue {
+// TODO maybe split valeus and expressions logic
+func (p *Parser) parseAssignable() NodeValue {
 	assert(validValues[p.currItem.typ] || p.currItem.typ > itemCommand,
 		"parseValue should be invoked with currItem at a simple value, list, subexpression or command, got %s",
 		p.currItem)
 
-	var n nodeValue
+	var n NodeValue
 
 	if validValues[p.currItem.typ] {
 		n = p.parseValue()
@@ -165,20 +172,20 @@ func (p *Parser) parseAssignable() nodeValue {
 
 		if p.currItem.typ == itemPipe {
 			p.nextItem()
-			if n.valueType() != valueList {
-				n = nodeList[nodeValue]{n}
+			if n.ValueType() != ValueList {
+				n = NodeList[NodeValue]{n}
 			}
-			n = nodeExpr{input: n.(nodeList[nodeValue]), pipeline: p.parsePipeline()}
+			n = NodeExpr{Input: n.(NodeList[NodeValue]), Pipeline: p.parsePipeline()}
 		}
 	} else if p.currItem.typ > itemCommand {
-		n = nodeExpr{pipeline: p.parsePipeline(), input: nil}
+		n = NodeExpr{Pipeline: p.parsePipeline(), Input: nil}
 	}
 
 	return n
 }
 
 // TODO hangle empty body case `()`
-func (p *Parser) parseSubExprBody() nodeValue {
+func (p *Parser) parseSubExprBody() NodeValue {
 	assert(p.currItem.typ == itemLeftParen,
 		"parseSubExprBody should be invoked with currItem at left paren (the beginning of its body), got %s",
 		p.currItem)
@@ -198,30 +205,30 @@ func (p *Parser) parseSubExprBody() nodeValue {
 	return n
 }
 
-func (p *Parser) parseSubExpr(v nodeValue) nodeSubExpr {
+func (p *Parser) parseSubExpr(v NodeValue) NodeSubExpr {
 
-	assert(v.valueType() == valueList,
+	assert(v.ValueType() == ValueList,
 		"parseSubExpr's argument is assumed to be a list, but got %s", p.currItem)
 
-	argList := make(nodeList[nodeIdent], 0)
-	for _, arg := range v.(nodeList[nodeValue]) {
-		if arg.valueType() != valueIdentifier {
+	argList := make(NodeList[NodeIdent], 0)
+	for _, arg := range v.(NodeList[NodeValue]) {
+		if arg.ValueType() != ValueIdentifier {
 			p.errorf("a subexpression's argument list must be a list of identifiers, but got %s", arg)
 		}
-		argList = append(argList, arg.(nodeIdent))
+		argList = append(argList, arg.(NodeIdent))
 	}
 
-	var n nodeSubExpr
-	n.params = argList
+	var n NodeSubExpr
+	n.Params = argList
 
 	p.nextItem()
-	n.body = p.parseSubExprBody()
+	n.Body = p.parseSubExprBody()
 
 	return n
 }
 
-func (p *Parser) parsePipeline() nodePipeline {
-	node := make(nodePipeline, 0)
+func (p *Parser) parsePipeline() NodePipeline {
+	node := make(NodePipeline, 0)
 
 	assert(p.currItem.typ > itemCommand,
 		"parsePipeline should be invoked with currItem at a command, got %s", p.currItem)
@@ -246,8 +253,8 @@ func (p *Parser) parsePipeline() nodePipeline {
 }
 
 // TODO: Rewrite this. it does not handle trailing commas, empty lists, and lists spanning multiple lines
-func (p *Parser) parseSimpleValueList() nodeList[nodeValue] {
-	list := make(nodeList[nodeValue], 0)
+func (p *Parser) parseSimpleValueList() NodeList[NodeValue] {
+	list := make(NodeList[NodeValue], 0)
 	assert(p.currItem.typ == itemLeftBrace, "parseSimpleValueList should be invoked with currItem at left brace, got %s", p.currItem)
 	for p.currItem.typ != itemRightBrace {
 		p.nextItem()
@@ -266,21 +273,21 @@ func (p *Parser) parseSimpleValueList() nodeList[nodeValue] {
 	return list
 }
 
-func (p *Parser) parseSimpleValue() nodeValue {
+func (p *Parser) parseSimpleValue() NodeValue {
 	assert(
 		validValues[p.currItem.typ],
 		"parseSimpleValue should be invoked with a valid value, but got %s", p.currItem,
 	)
-	var n nodeValue
+	var n NodeValue
 	switch p.currItem.typ {
 	case itemIdentifier, itemSelfStar, itemStream:
-		n = nodeIdent(p.currItem.val)
+		n = NodeIdent(p.currItem.val)
 	case itemNumber:
-		n = nodeLiteralNumber(strToLiteralNumber(p.currItem.val))
+		n = NodeLiteralNumber(strToLiteralNumber(p.currItem.val))
 	case itemBool:
-		n = nodeLiteralBool(strToLiteralBool(p.currItem.val))
+		n = NodeLiteralBool(strToLiteralBool(p.currItem.val))
 	case itemString:
-		n = nodeLiteralString(p.currItem.val)
+		n = NodeLiteralString(p.currItem.val)
 	default:
 		p.errorf("parseSimpleValue should be invoked with a valid value, but got %s", p.currItem)
 	}
@@ -288,20 +295,20 @@ func (p *Parser) parseSimpleValue() nodeValue {
 	return n
 }
 
-func strToLiteralBool(s string) nodeLiteralBool { return s == "true" }
-func strToLiteralNumber(s string) nodeLiteralNumber {
+func strToLiteralBool(s string) NodeLiteralBool { return s == "true" }
+func strToLiteralNumber(s string) NodeLiteralNumber {
 	n, err := strconv.ParseFloat(s, 64)
 	assert(err == nil, "lexer mus provided a valid number, failed to parse number %s", s)
-	return nodeLiteralNumber(n)
+	return NodeLiteralNumber(n)
 }
 
-func (p *Parser) parseAssignment() nodeAssign {
-	var node nodeAssign
+func (p *Parser) parseAssignment() NodeAssign {
+	var node NodeAssign
 
-	node.dest = p.parseIdentList()
+	node.Dest = p.parseIdentList()
 
 	if p.currItem.typ == itemDeclare {
-		node.define = true
+		node.Define = true
 	} else if p.currItem.typ != itemAssign {
 		p.errorf("expected assignment or declaration, got %s", p.peekItem)
 	}
@@ -312,16 +319,16 @@ func (p *Parser) parseAssignment() nodeAssign {
 		p.nextItem()
 	}
 
-	node.value = p.parseAssignable()
+	node.Value = p.parseAssignable()
 
 	return node
 }
 
-func (p *Parser) parseIdentList() nodeList[nodeIdent] {
-	var idents nodeList[nodeIdent]
+func (p *Parser) parseIdentList() NodeList[NodeIdent] {
+	var idents NodeList[NodeIdent]
 	for p.currItem.typ == itemIdentifier {
 
-		idents = append(idents, nodeIdent(p.currItem.val))
+		idents = append(idents, NodeIdent(p.currItem.val))
 		p.nextItem()
 
 		if p.currItem.typ == itemComma {
@@ -333,34 +340,34 @@ func (p *Parser) parseIdentList() nodeList[nodeIdent] {
 }
 
 // TODO: Respect operator precedence
-func (p *Parser) parseMathExpression() nodeValue {
+func (p *Parser) parseMathExpression() NodeValue {
 	return p.parseTerm()
 }
 
-func (p *Parser) parseTerm() nodeValue {
+func (p *Parser) parseTerm() NodeValue {
 	node := p.parseFactor()
 	for p.currItem.typ == itemPlus || p.currItem.typ == itemMinus {
 		op := p.currItem.typ
 		p.nextItem()
-		node = nodeExprMath{left: node, op: op, right: p.parseFactor()}
+		node = NodeExprMath{Left: node, Op: op, Right: p.parseFactor()}
 	}
 	return node
 }
 
-func (p *Parser) parseFactor() nodeValue {
+func (p *Parser) parseFactor() NodeValue {
 	node := p.parsePrimary()
 	for p.currItem.typ == itemMult || p.currItem.typ == itemDiv {
 		op := p.currItem.typ
 		p.nextItem()
-		node = nodeExprMath{left: node, op: op, right: p.parsePrimary()}
+		node = NodeExprMath{Left: node, Op: op, Right: p.parsePrimary()}
 	}
 	return node
 }
 
-func (p *Parser) parsePrimary() nodeValue {
+func (p *Parser) parsePrimary() NodeValue {
 	switch p.currItem.typ {
 	case itemIdentifier:
-		node := nodeIdent(p.currItem.val)
+		node := NodeIdent(p.currItem.val)
 		p.nextItem()
 		return node
 	case itemNumber:
@@ -381,8 +388,16 @@ func (p *Parser) parsePrimary() nodeValue {
 	}
 }
 
+type AssertError struct {
+	Message string
+}
+
+func (e AssertError) Error() string {
+	return "Assertion Failed: " + e.Message
+}
+
 func assert(condition bool, msg string, args ...any) {
 	if !condition {
-		panic(fmt.Errorf("assertion failed: "+msg, args...))
+		panic(AssertError{Message: fmt.Sprintf(msg, args...)})
 	}
 }

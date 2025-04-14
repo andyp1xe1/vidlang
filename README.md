@@ -2,7 +2,6 @@
 
 Our VidLang DSL offers a straightforward approach to video and audio manipulation, centered around a pipeline-oriented methodology. Programs written in our DSL consist of commands, which can be chained together using the familiar pipe operator (`|>`). Tracks, representing audio and video streams, serve as the primary data type. Our language facilitates variable assignment, list construction, and the creation of subexpressions, enabling complex and parameterized operations. The global `stream` variable stores the result of the most recent pipeline. The self-reference operator `*` enables the construction of mutable statements.
 
-A code example showcasing a range of features:
 ```
 #!/bin/venv vidlang
 
@@ -96,7 +95,7 @@ audioTrack |> volume 1.5
 
 ```
 
-![parse tree 1](./parse_tree_1.png)
+![parse tree 1](./resources/parse_tree_1.png)
 
 and a more complex one:
 ```
@@ -105,7 +104,7 @@ audioTrack = [stream, *]
     |> pitch 1.5
 ```
 
-![parse tree 2](./parse_tree_2.png)
+![parse tree 2](./resources/parse_tree_2.png)
 
 #### Complexity Analysis
 

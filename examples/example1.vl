@@ -1,5 +1,9 @@
 #!/bin/venv vidlang
 
+a := [ "a.mp4", "b.mp4" ]
+
+newCommand := [test1, test2] (trackline [test1, test2])
+
 videoTrack, audioTrack := open "video.mp4"
 introVid, introAud := open "intro.mp4"
 outro, outroAud := open "outro.mp4"
