@@ -1,0 +1,4 @@
+# Basic VidLang script
+track := open "./server/screencast.mp4"
+
+export track "output.mp4"

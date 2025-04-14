@@ -89,15 +89,24 @@ func (s NodeSubExpr) String() string {
 	return fmt.Sprintf("[%s] -> %s", strings.Join(params, ", "), s.Body.String())
 }
 
+type OpType int
+
+const (
+	OpAdd OpType = OpType(itemPlus)
+	OpDiv OpType = OpType(itemDiv)
+	OpMul OpType = OpType(itemMult)
+	OpSub OpType = OpType(itemMinus)
+)
+
 type NodeExprMath struct {
 	Left  NodeValue
-	Op    itemType
+	Op    OpType
 	Right NodeValue
 }
 
 func (n NodeExprMath) ValueType() ValueType { return ValueExpr }
 func (n NodeExprMath) String() string {
-	return fmt.Sprintf("(%s %s %s)", n.Left.String(), n.Op.String(), n.Right.String())
+	return fmt.Sprintf("(%s %s %s)", n.Left.String(), itemType(n.Op).String(), n.Right.String())
 }
 
 type Node interface{}

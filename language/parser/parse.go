@@ -347,7 +347,7 @@ func (p *Parser) parseMathExpression() NodeValue {
 func (p *Parser) parseTerm() NodeValue {
 	node := p.parseFactor()
 	for p.currItem.typ == itemPlus || p.currItem.typ == itemMinus {
-		op := p.currItem.typ
+		op := OpType(p.currItem.typ)
 		p.nextItem()
 		node = NodeExprMath{Left: node, Op: op, Right: p.parseFactor()}
 	}
@@ -357,7 +357,7 @@ func (p *Parser) parseTerm() NodeValue {
 func (p *Parser) parseFactor() NodeValue {
 	node := p.parsePrimary()
 	for p.currItem.typ == itemMult || p.currItem.typ == itemDiv {
-		op := p.currItem.typ
+		op := OpType(p.currItem.typ)
 		p.nextItem()
 		node = NodeExprMath{Left: node, Op: op, Right: p.parsePrimary()}
 	}
