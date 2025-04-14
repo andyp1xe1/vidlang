@@ -1,7 +1,9 @@
 package main
 
 import (
-	"fmt"
+	"bufio"
+	"flag"
+	"io"
 	"log"
 	"os"
 
@@ -9,22 +11,58 @@ import (
 )
 
 func main() {
-	if len(os.Args) < 2 {
-		fmt.Println("Usage: vidlang <script.vl>")
+
+	var fileName string
+	var useStdin bool
+	var debug bool
+	flag.StringVar(&fileName, "script", "", "script file to parse")
+	flag.BoolVar(&useStdin, "stdin", false, "read script from stdin")
+	flag.BoolVar(&debug, "debug", false, "enable debug mode")
+
+	flag.Parse()
+
+	if len(fileName) == 0 && !useStdin {
+		flag.Usage()
 		os.Exit(1)
 	}
 
-	scriptPath := os.Args[1]
+	var script string
+	var err error
 
-	// Read the script file
-	content, err := os.ReadFile(scriptPath)
+	if useStdin {
+		if script, err = readStdin(); err != nil {
+			log.Fatalf("Failed to read stdin: %s", err)
+		}
+	} else {
+		if script, err = readFile(fileName); err != nil {
+			log.Fatalf("Failed to read script file: %s", err)
+		}
+	}
+
+	if err := interpreter.Interpret(script, debug); err != nil {
+		log.Fatalf("Failed to interpret script: %s", err)
+	}
+}
+
+func readFile(fileName string) (string, error) {
+	res, err := os.ReadFile(fileName)
 	if err != nil {
-		log.Fatalf("Error reading script file: %v", err)
+		return "", err
 	}
+	return string(res), nil
+}
 
-	if err := interpreter.Interpret(string(content), true); err != nil {
-		log.Fatalf("Error executing script: %v", err)
+func readStdin() (string, error) {
+	var script string
+	reader := bufio.NewReader(os.Stdin)
+	for {
+		line, err := reader.ReadString('\n')
+		if err == io.EOF {
+			break
+		} else if err != nil {
+			return "", err
+		}
+		script += line
 	}
-
-	fmt.Println("Script executed successfully")
+	return script, nil
 }
