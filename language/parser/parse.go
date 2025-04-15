@@ -86,6 +86,7 @@ func (p *Parser) run() {
 var validArgs = map[itemType]bool{
 	itemLeftBrace:  true,
 	itemIdentifier: true,
+	itemStream:     true,
 	itemNumber:     true,
 	itemString:     true,
 	itemBool:       true,

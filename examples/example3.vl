@@ -1,0 +1,4 @@
+# Usage of the implicit stream
+
+open "./server/screencast.mp4"
+export stream "output.mp4" 
