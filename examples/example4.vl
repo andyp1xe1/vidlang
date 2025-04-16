@@ -1,0 +1,9 @@
+# Variable Assignments
+
+vidfile := "./server/screencast.mp4"
+outfile := "output.mp4"
+
+track := open vidfile
+
+export track outfile
+export track "marcelo.mp4"

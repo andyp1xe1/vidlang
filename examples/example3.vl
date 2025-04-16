@@ -1,4 +1,6 @@
 # Usage of the implicit stream
 
+vid_file = "./server/screencast.mp4"
+
 open "./server/screencast.mp4"
 export stream "output.mp4" 

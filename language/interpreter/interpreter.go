@@ -2,6 +2,7 @@ package interpreter
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/andyp1xe1/vidlang/language/parser"
 	ffmpeg "github.com/u2takey/ffmpeg-go"
@@ -36,11 +37,61 @@ type ValueBox struct {
 type Stream struct {
 	FFStream *ffmpeg.Stream
 	Type     StreamType
+	UseCopy  bool
+}
+type SplitNode struct {
+	*ffmpeg.Node
+	StreamType
+}
+
+type streamStore struct {
+	splitNodes      map[parser.NodeIdent]*SplitNode
+	originalStreams map[parser.NodeIdent]*Stream
+	splitCounts     map[parser.NodeIdent]int
+}
+
+func newStreamStore() streamStore {
+	return streamStore{
+		splitNodes:      make(map[parser.NodeIdent]*SplitNode),
+		originalStreams: make(map[parser.NodeIdent]*Stream),
+		splitCounts:     make(map[parser.NodeIdent]int),
+	}
+}
+
+func (s streamStore) get(name parser.NodeIdent) (*Stream, error) {
+	stream, ok := s.originalStreams[name]
+	if ok {
+		if !stream.UseCopy {
+			delete(s.originalStreams, name)
+		}
+		return stream, nil
+	}
+	fnode, ok := s.splitNodes[name]
+	if !ok {
+		return nil, fmt.Errorf("stream variable %s not defined", name)
+	}
+	stream = &Stream{
+		FFStream: fnode.Get(fmt.Sprintf("%v", s.splitCounts)),
+		UseCopy:  false,
+		Type:     fnode.StreamType,
+	}
+	s.splitCounts[name] = s.splitCounts[name] + 1
+	return stream, nil
+}
+
+func (s streamStore) set(name parser.NodeIdent, stream *Stream) {
+	if stream.UseCopy {
+		s.originalStreams[name] = stream
+		return
+	}
+	s.splitNodes[name] = &SplitNode{stream.FFStream.Split(), stream.Type}
+	s.splitCounts[name] = 0
 }
 
 // Context holds the running state of the interpreter
 type Context struct {
 	variables    map[parser.NodeIdent]ValueBox
+	streams      streamStore
 	scopeGStream *Stream
 	debug        bool
 }
@@ -49,9 +100,18 @@ type Context struct {
 func NewContext(debug bool) *Context {
 	return &Context{
 		variables:    make(map[parser.NodeIdent]ValueBox),
+		streams:      newStreamStore(),
 		scopeGStream: nil,
 		debug:        debug,
 	}
+}
+
+func (c *Context) getStream(name parser.NodeIdent) (*Stream, error) {
+	return c.streams.get(name)
+}
+
+func (c *Context) setStream(name parser.NodeIdent, stream *Stream) {
+	c.streams.set(name, stream)
 }
 
 func (c *Context) getVar(name parser.NodeIdent) (ValueBox, error) {
@@ -73,7 +133,7 @@ func (c *Context) setVar(name parser.NodeIdent, typ valueType, v any) {
 	c.variables[name] = ValueBox{v, typ}
 }
 
-func (c *Context) setLiteral(name parser.NodeIdent, node parser.Node) {
+func literalToBox(node parser.Node) ValueBox {
 	var box ValueBox
 	switch v := node.(type) {
 	case parser.NodeLiteralBool:
@@ -82,10 +142,24 @@ func (c *Context) setLiteral(name parser.NodeIdent, node parser.Node) {
 		box = ValueBox{v, ValueNumber}
 	case parser.NodeLiteralString:
 		box = ValueBox{v, ValueString}
-	case parser.NodeSubExpr:
-		box = ValueBox{v, ValueSubExpr}
 	}
-	c.variables[name] = box
+	return box
+}
+
+func boxToPrimitive(v ValueBox) any {
+	switch v.typ {
+	case ValueBool:
+		return bool(v.any.(parser.NodeLiteralBool))
+	case ValueNumber:
+		return float64(v.any.(parser.NodeLiteralNumber))
+	case ValueString:
+		return strings.Trim(v.any.(parser.NodeLiteralString).String(), "\"")
+	}
+	return nil
+}
+
+func (c *Context) setLiteral(name parser.NodeIdent, node parser.Node) {
+	c.variables[name] = literalToBox(node)
 }
 
 func (c *Context) setBox(name parser.NodeIdent, box ValueBox) {
@@ -141,23 +215,21 @@ func evaluateAssignment(ctx *Context, node parser.NodeAssign) error {
 		return fmt.Errorf("invalid assignment: no destination")
 	}
 
-	var val ValueBox
-
+	var stream *Stream
+	var err error
 	if value, ok := node.Value.(parser.NodeExpr); ok {
-		res, err := evaluateExpression(ctx, value)
+		stream, err = evaluateExpression(ctx, value)
 		if err != nil {
 			return err
 		}
-		val = ValueBox{res, ValueStream}
+		ctx.setStream(node.Dest[0], stream)
 	}
 
 	if len(node.Dest) > 1 {
 		return fmt.Errorf("cannot assign stream to multiple variables for now")
 	}
 
-	if val.any != nil {
-		ctx.setBox(node.Dest[0], val)
-	} else {
+	if stream == nil {
 		ctx.setLiteral(node.Dest[0], node.Value)
 	}
 
@@ -174,24 +246,19 @@ func evaluateExpression(ctx *Context, expr parser.NodeExpr) (*Stream, error) {
 	}
 
 	if len(expr.Input) == 1 {
-		var val ValueBox
 		input := expr.Input[0]
 		v, ok := input.(parser.NodeIdent)
 		if !ok {
 			return nil, fmt.Errorf("invalid input type: %T", input)
 		}
-		if val, err = ctx.getVar(v); err != nil {
+		if stream, err = ctx.getStream(v); err != nil {
 			return nil, err
-		} else if val.typ != ValueStream {
-			return nil, fmt.Errorf("variable %s is not a stream", v)
 		}
-
-		stream = val.any.(*Stream)
 	}
 
 	for _, cmd := range expr.Pipeline {
 		var err error
-		stream, err = evaluateCommand(ctx, cmd, nil)
+		stream, err = evaluateCommand(ctx, cmd, stream)
 		if err != nil {
 			return nil, err
 		}

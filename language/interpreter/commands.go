@@ -23,11 +23,11 @@ func cmdOpen(ctx *Context, _ *Stream, args []parser.NodeValue) (*Stream, error) 
 	}
 
 	var filename string
-	switch arg := args[0].(type) {
-	case parser.NodeLiteralString:
-		filename = strings.Trim(string(arg), "\"")
-	default:
-		return nil, fmt.Errorf("open command requires a string argument")
+
+	if val, err := getArg(ctx, args[0], ValueString); err != nil {
+		return nil, fmt.Errorf("open command requires a string argument but: %v", err)
+	} else {
+		filename = boxToPrimitive(val).(string)
 	}
 
 	if _, err := os.Stat(filename); os.IsNotExist(err) {
@@ -39,6 +39,7 @@ func cmdOpen(ctx *Context, _ *Stream, args []parser.NodeValue) (*Stream, error) 
 	stream := &Stream{
 		FFStream: ffStream,
 		Type:     MultiStream, // TODO split
+		UseCopy:  true,
 	}
 
 	if ctx.debug {
@@ -57,48 +58,30 @@ func cmdExport(env *Context, _ *Stream, args []parser.NodeValue) (*Stream, error
 
 	var outputFile string
 	var input *Stream
-	var ident parser.NodeIdent
+	var err error
 
 	// Get the stream argument
-	ident, ok := args[0].(parser.NodeIdent)
-	if !ok {
-		return nil, fmt.Errorf("export command requires as first argument a stream but got: %T", args[0])
-	}
-	if v, err := env.getVar(ident); err != nil {
-		return nil, err
-	} else if v.typ != ValueStream {
-		return nil, fmt.Errorf("export command requires as first argument a stream but got: %s", args[0])
-	} else {
-		input = v.any.(*Stream)
+	if input, err = getStreamArg(env, args[0]); err != nil {
+		return nil, fmt.Errorf(
+			"export command requires as first argument a stream but: %v", err)
 	}
 
 	// Get the output filename
-	switch arg := args[1].(type) {
-	case parser.NodeLiteralString:
-		outputFile = strings.Trim(string(arg), "\"")
-	case parser.NodeIdent:
-		var err error
-		v, err := env.getVar(arg)
-		if err != nil {
-			return nil, err
-		}
-		if v.typ != ValueString {
-			return nil, fmt.Errorf("export command requires as second argument a string but got: %s", args[1])
-		}
-	default:
-		return nil, fmt.Errorf("export command requires as second argument a string but got: %s", args[1])
+	if val, err := getArg(env, args[1], ValueString); err != nil {
+		return nil, fmt.Errorf(
+			"export command requires as second argument a string but: %v", err)
+	} else {
+		outputFile = boxToPrimitive(val).(string)
 	}
 
-	outputStream := input.FFStream.Output(outputFile).OverWriteOutput()
-
-	if env.debug {
-		fmt.Printf("Exporting to file: %s\n", outputFile)
-		fmt.Printf("FFmpeg command: %s\n", outputStream)
+	ffargs := make(ffmpeg.KwArgs)
+	if input.UseCopy {
+		ffargs["c"] = "copy"
 	}
+	outputStream := input.FFStream.Output(outputFile, ffargs)
 
 	var errBuf strings.Builder
-
-	err := outputStream.ErrorToStdOut().WithErrorOutput(&errBuf).Run()
+	err = outputStream.ErrorToStdOut().WithErrorOutput(&errBuf).Run()
 	if err != nil {
 		ffmpegOutput := errBuf.String()
 		return nil, fmt.Errorf("export failed: %w\nFFmpeg output:\n%s", err, ffmpegOutput)
@@ -107,6 +90,33 @@ func cmdExport(env *Context, _ *Stream, args []parser.NodeValue) (*Stream, error
 	if env.debug {
 		fmt.Println("Export completed successfully")
 	}
-
 	return input, nil
+
+}
+
+func getStreamArg(env *Context, arg parser.NodeValue) (*Stream, error) {
+	if arg.ValueType() == parser.ValueIdentifier {
+		return env.getStream(arg.(parser.NodeIdent))
+	}
+	return nil, fmt.Errorf("expected an identifier but got %s", arg)
+}
+
+func getArg(env *Context, arg parser.NodeValue, expectType valueType) (ValueBox, error) {
+	switch v := arg.(type) {
+	case parser.NodeIdent:
+		val, err := env.getVar(v)
+		if err != nil {
+			return ValueBox{}, err
+		}
+		if val.typ != expectType {
+			return ValueBox{}, fmt.Errorf("expected type %v but got %v", expectType, val.typ)
+		}
+		return val, nil
+	default:
+		box := literalToBox(v)
+		if box.typ != expectType {
+			return ValueBox{}, fmt.Errorf("expected type %v but got %v", expectType, box.typ)
+		}
+		return box, nil
+	}
 }
