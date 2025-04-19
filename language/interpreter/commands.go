@@ -9,29 +9,54 @@ import (
 	ffmpeg "github.com/u2takey/ffmpeg-go"
 )
 
-type cmdHandler func(*Context, *Stream, []parser.NodeValue) (*Stream, error)
+type cmdHandler func(*Context, *Stream, []parser.NodeValue) (*Stream, bool, error)
 
 var handlerMap = map[string]cmdHandler{
-	"open":   cmdOpen,
-	"export": cmdExport,
+	"open":     cmdOpen,
+	"export":   cmdExport,
+	"contrast": cmdContrast,
+}
+
+// Mock for testing
+func cmdContrast(ctx *Context, input *Stream, args []parser.NodeValue) (*Stream, bool, error) {
+	canCopy := false
+	if ctx.debug {
+		fmt.Printf("Contrast: %v\n", args)
+	}
+	if len(args) != 1 {
+		return nil, canCopy, fmt.Errorf("command contrast requires exactly 1 argument")
+	}
+	contrast, err := getArg(ctx, args[0], ValueNumber)
+	if err != nil {
+		return nil, canCopy, fmt.Errorf(
+			"command contrast requires a number argument but: %v", err)
+	}
+	//input.UseCopy = false
+	return &Stream{
+		FFStream: input.FFStream.Filter(
+			"eq", ffmpeg.Args{fmt.Sprintf("contrast=%v", boxToPrimitive(contrast))}),
+		Type: input.Type,
+	}, canCopy, nil
 }
 
 // cmdOpen implements the 'open' command
-func cmdOpen(ctx *Context, _ *Stream, args []parser.NodeValue) (*Stream, error) {
+func cmdOpen(ctx *Context, _ *Stream, args []parser.NodeValue) (*Stream, bool, error) {
+	canCopy := true
+
 	if len(args) != 1 {
-		return nil, fmt.Errorf("open command requires exactly one argument")
+		return nil, canCopy, fmt.Errorf("open command requires exactly one argument")
 	}
 
 	var filename string
 
 	if val, err := getArg(ctx, args[0], ValueString); err != nil {
-		return nil, fmt.Errorf("open command requires a string argument but: %v", err)
+		return nil, canCopy, fmt.Errorf("open command requires a string argument but: %v", err)
 	} else {
 		filename = boxToPrimitive(val).(string)
 	}
 
 	if _, err := os.Stat(filename); os.IsNotExist(err) {
-		return nil, fmt.Errorf("file not found: %s", filename)
+		return nil, canCopy, fmt.Errorf("file not found: %s", filename)
 	}
 
 	ffStream := ffmpeg.Input(filename)
@@ -39,43 +64,43 @@ func cmdOpen(ctx *Context, _ *Stream, args []parser.NodeValue) (*Stream, error) 
 	stream := &Stream{
 		FFStream: ffStream,
 		Type:     MultiStream, // TODO split
-		UseCopy:  true,
 	}
 
 	if ctx.debug {
 		fmt.Printf("Opened file: %s\n", filename)
 	}
 
-	return stream, nil
+	return stream, canCopy, nil
 }
 
 // cmdExport implements the 'export' command
-func cmdExport(env *Context, _ *Stream, args []parser.NodeValue) (*Stream, error) {
+func cmdExport(env *Context, _ *Stream, args []parser.NodeValue) (*Stream, bool, error) {
 
 	if len(args) != 2 {
-		return nil, fmt.Errorf("export command requires exactly two arguments")
+		return nil, false, fmt.Errorf("export command requires exactly two arguments")
 	}
 
 	var outputFile string
 	var input *Stream
+	var canCopy bool
 	var err error
 
 	// Get the stream argument
-	if input, err = getStreamArg(env, args[0]); err != nil {
-		return nil, fmt.Errorf(
+	if input, canCopy, err = getStreamArg(env, args[0]); err != nil {
+		return nil, canCopy, fmt.Errorf(
 			"export command requires as first argument a stream but: %v", err)
 	}
 
 	// Get the output filename
 	if val, err := getArg(env, args[1], ValueString); err != nil {
-		return nil, fmt.Errorf(
+		return nil, canCopy, fmt.Errorf(
 			"export command requires as second argument a string but: %v", err)
 	} else {
 		outputFile = boxToPrimitive(val).(string)
 	}
 
 	ffargs := make(ffmpeg.KwArgs)
-	if input.UseCopy {
+	if canCopy {
 		ffargs["c"] = "copy"
 	}
 	outputStream := input.FFStream.Output(outputFile, ffargs)
@@ -84,21 +109,21 @@ func cmdExport(env *Context, _ *Stream, args []parser.NodeValue) (*Stream, error
 	err = outputStream.ErrorToStdOut().WithErrorOutput(&errBuf).Run()
 	if err != nil {
 		ffmpegOutput := errBuf.String()
-		return nil, fmt.Errorf("export failed: %w\nFFmpeg output:\n%s", err, ffmpegOutput)
+		return nil, canCopy, fmt.Errorf("export failed: %w\nFFmpeg output:\n%s", err, ffmpegOutput)
 	}
 
 	if env.debug {
 		fmt.Println("Export completed successfully")
 	}
-	return input, nil
+	return input, canCopy, nil
 
 }
 
-func getStreamArg(env *Context, arg parser.NodeValue) (*Stream, error) {
+func getStreamArg(env *Context, arg parser.NodeValue) (*Stream, bool, error) {
 	if arg.ValueType() == parser.ValueIdentifier {
-		return env.getStream(arg.(parser.NodeIdent))
+		return env.streams.getAuto(arg.(parser.NodeIdent))
 	}
-	return nil, fmt.Errorf("expected an identifier but got %s", arg)
+	return nil, false, fmt.Errorf("expected an identifier but got %s", arg)
 }
 
 func getArg(env *Context, arg parser.NodeValue, expectType valueType) (ValueBox, error) {

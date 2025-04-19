@@ -3,7 +3,11 @@
 vidfile := "./server/screencast.mp4"
 outfile := "output.mp4"
 
-track := open vidfile
+track := open vidfile # track -> can copy
+track2 := track |> contrast 0.5 # track2 -> no copy / mb split
+#track3 := track |> trim "00:00:00" "00:01:00" # track3 -> can copy
+
+#final := concat track2 track3 # no copy
 
 export track outfile
-export track "marcelo.mp4"
+export track2 "marcelo.mp4"
