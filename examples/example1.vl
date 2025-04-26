@@ -20,8 +20,9 @@ videoTrack =*
     |> contrast 1.1
 
 audSequence := [introAud, audioTrack, outroAud]
-    |> map [i, el] ( el |> volume 0.5*i+1 )
+    |> map [i, el] ( el |> volume 3*2 + 0.5*i + 1 )
+    |> brightness 1.1
 vidSequence :=  [intoVid, videoTrack, outro]
 trackline audSequence vidSequence
 # or trackline audSequence [introVid, videoTrack, outro]
-export "final.mp4"
+export "final.mp4" 
