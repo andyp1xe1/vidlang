@@ -202,6 +202,9 @@ func evaluate(ctx *Context, node parser.Node) error {
 		}
 		ctx.scopeGStream = stream
 		return nil
+	case parser.AstError:
+		return fmt.Errorf("interpreter error: %v", n.Error())
+
 	default:
 		return fmt.Errorf("unsupported node type: %T", node)
 	}
