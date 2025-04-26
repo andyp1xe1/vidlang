@@ -240,8 +240,8 @@ func lexNumber(l *lexer) stateFn {
 
 // lexString scans a string literal. The opening quote has already been consumed
 func lexString(l *lexer) stateFn {
-	for {
-		r := l.next()
+	r := l.next()
+	for r != '"' {
 		if r == eof {
 			return l.errorf("unterminated string")
 		}
@@ -253,9 +253,7 @@ func lexString(l *lexer) stateFn {
 			}
 			continue
 		}
-		if r == '"' {
-			break
-		}
+		r = l.next()
 	}
 	l.emit(itemString)
 	return lexScript
