@@ -103,7 +103,9 @@ ffplay udp://127.0.0.1:1234
 
 ## Showcase
 
-The following figure shows how the editing workflow looks. The editor writes commands in their editor of choice (right pane), and after a very fast preview export, they see the approximated result in their UDP-capable video player of choice. Editing and adjusting filter values and seeing how they look is seamless:
+The following figure shows how the editing workflow looks. 
+The editor writes commands in the editor of choice (the right pane), and after a very fast preview export they see the aproximated result in their UDP capable video player of choice. Editing and adjusting filter values and seeing how they look is as seamless as it can get:
+
 
 ![Editing and live preview workflow](./resources/preview.png)
 
