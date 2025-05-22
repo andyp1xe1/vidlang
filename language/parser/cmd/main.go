@@ -38,7 +38,7 @@ func main() {
 		}
 	}
 
-	p := parser.Parse(script)
+	p := parser.Parse(script, true)
 	for expr := range p.Expressions {
 		parser.PrintTree(expr, "")
 	}

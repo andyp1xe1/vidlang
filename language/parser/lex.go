@@ -132,7 +132,7 @@ func lexScript(l *lexer) stateFn {
 		return lexComment
 	case r == '"':
 		return lexString
-	case unicode.IsDigit(r):
+	case unicode.IsDigit(r), r == '+', r == '-':
 		l.backup()
 		return lexNumber
 	case isAlphaNumeric(r):

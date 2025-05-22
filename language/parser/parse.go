@@ -13,12 +13,15 @@ type Parser struct {
 	currItem  item
 	peekItem  item
 	peek2Item item
+
+	debug bool
 }
 
-func Parse(input string) *Parser {
+func Parse(input string, debug bool) *Parser {
 	p := &Parser{
 		Expressions: make(chan Node),
 		lex:         lex(input),
+		debug:       debug,
 	}
 	p.currItem = <-p.lex.items
 	p.peekItem = <-p.lex.items
@@ -285,6 +288,10 @@ func (p *Parser) parseSimpleValue() NodeValue {
 		n = NodeIdent(p.currItem.val)
 	case itemNumber:
 		n = NodeLiteralNumber(strToLiteralNumber(p.currItem.val))
+		if p.debug {
+			fmt.Println("DEBUG: num tok:", p.currItem.val)
+			fmt.Println("DEBUG: num val:", n)
+		}
 	case itemBool:
 		n = NodeLiteralBool(strToLiteralBool(p.currItem.val))
 	case itemString:
