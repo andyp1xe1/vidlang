@@ -38,10 +38,13 @@ type Stream struct {
 	FFStream *ffmpeg.Stream
 	Type     StreamType
 }
+
 type SplitNode struct {
 	*ffmpeg.Node
 	StreamType
 }
+
+type StreamList []*Stream
 
 type streamStore struct {
 	splitNodes     map[parser.NodeIdent]*SplitNode
@@ -98,7 +101,7 @@ type Context struct {
 	variables    map[parser.NodeIdent]ValueBox
 	streams      streamStore
 	scopeGStream *Stream
-	exports      map[*parser.NodeList[parser.Node]]*Stream // TODO track exported streams for bulk exporting
+	exports      map[*parser.NodeList[parser.Node]]*Stream // TODO track export streams for bulk exporting
 	debug        bool
 }
 
@@ -170,7 +173,7 @@ type Interpreter struct {
 }
 
 func Interpret(code string, debug bool) error {
-	parser := parser.Parse(code)
+	parser := parser.Parse(code, false)
 
 	i := &Interpreter{
 		parser: parser,
