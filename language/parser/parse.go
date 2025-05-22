@@ -18,6 +18,10 @@ type Parser struct {
 }
 
 func Parse(input string, debug bool) *Parser {
+	if len(input) == 0 || input[len(input)-1] != '\n' {
+		input += "\n"
+	}
+
 	p := &Parser{
 		Expressions: make(chan Node),
 		lex:         lex(input),
@@ -99,7 +103,7 @@ func (p *Parser) parseCommand() NodeCommand {
 	var node NodeCommand
 	node.Name = p.currItem.val
 	node.Args = make([]NodeValue, 0)
-	for validArgs[p.peekItem.typ] && p.peekItem.typ != itemNewline {
+	for validArgs[p.peekItem.typ] && p.peekItem.typ != itemNewline && p.currItem.typ != itemNewline {
 		p.nextItem()
 		assert(
 			validArgs[p.currItem.typ],
@@ -188,15 +192,18 @@ func (p *Parser) parseAssignable() NodeValue {
 	return n
 }
 
-// TODO hangle empty body case `()`
 func (p *Parser) parseSubExprBody() NodeValue {
 	assert(p.currItem.typ == itemLeftParen,
 		"parseSubExprBody should be invoked with currItem at left paren (the beginning of its body), got %s",
 		p.currItem)
 	p.nextItem()
 
+	if p.currItem.typ == itemRightParen {
+		p.nextItem()
+		return nil
+	}
+
 	n := p.parseAssignable()
-	// TODO: This is a temporary fix! Very bad should be done something else
 	if p.currItem.typ != itemRightParen {
 		p.nextItem()
 	}
@@ -204,7 +211,7 @@ func (p *Parser) parseSubExprBody() NodeValue {
 	if p.currItem.typ != itemRightParen {
 		p.errorf("expected right paren at the end of subexpression body, got %s -> %s", p.currItem, p.peekItem)
 	}
-	//p.nextItem()
+	p.nextItem()
 
 	return n
 }
@@ -256,24 +263,31 @@ func (p *Parser) parsePipeline() NodePipeline {
 	return node
 }
 
-// TODO: Rewrite this. it does not handle trailing commas, empty lists, and lists spanning multiple lines
 func (p *Parser) parseSimpleValueList() NodeList[NodeValue] {
+	assert(p.currItem.typ == itemLeftBrace,
+		"parseSimpleValueList should start at left brace, got %s", p.currItem)
+
 	list := make(NodeList[NodeValue], 0)
-	assert(p.currItem.typ == itemLeftBrace, "parseSimpleValueList should be invoked with currItem at left brace, got %s", p.currItem)
-	for p.currItem.typ != itemRightBrace {
-		p.nextItem()
-		list = append(list, p.parseSimpleValue())
-		p.nextItem()
-		if p.currItem.typ != itemComma {
-			if p.currItem.typ != itemRightBrace {
-				p.errorf("list not terminated properly, expected comma or right brace, got %s", p.currItem)
-			}
-			break
+	p.nextItem()
+
+	for p.currItem.typ != itemRightBrace && p.currItem.typ != itemEOF {
+		if p.currItem.typ == itemComma || p.currItem.typ == itemNewline {
+			p.nextItem()
+			continue
 		}
+
+		list = append(list, p.parseValue())
+
+		if p.peekItem.typ == itemComma {
+			p.nextItem()
+		}
+		p.nextItem()
 	}
-	assert(
-		p.currItem.typ == itemRightBrace,
-		"it was assumed that the list was terminated by a right brace but got %s -> %s", p.currItem, p.peekItem)
+
+	if p.currItem.typ != itemRightBrace {
+		p.errorf("unterminated list, expected right brace, got %s", p.currItem)
+	}
+
 	return list
 }
 
@@ -347,29 +361,47 @@ func (p *Parser) parseIdentList() NodeList[NodeIdent] {
 	return idents
 }
 
-// TODO: Respect operator precedence
+var precedences = map[itemType]int{
+	itemPlus:  1,
+	itemMinus: 1,
+	itemMult:  2,
+	itemDiv:   2,
+	// if we add exp
+	// itemCaret: 3,
+}
+
 func (p *Parser) parseMathExpression() NodeValue {
-	return p.parseTerm()
+	return p.parseBinary(0)
 }
 
-func (p *Parser) parseTerm() NodeValue {
-	node := p.parseFactor()
-	for p.currItem.typ == itemPlus || p.currItem.typ == itemMinus {
+func (p *Parser) parseBinary(minPrec int) NodeValue {
+	left := p.parseUnary()
+
+	for {
+		prec, isOp := precedences[p.currItem.typ]
+		if !isOp || prec < minPrec {
+			break
+		}
 		op := OpType(p.currItem.typ)
 		p.nextItem()
-		node = NodeExprMath{Left: node, Op: op, Right: p.parseFactor()}
+
+		nextMin := prec + 1
+
+		right := p.parseBinary(nextMin)
+
+		left = NodeExprMath{Left: left, Op: op, Right: right}
 	}
-	return node
+	return left
 }
 
-func (p *Parser) parseFactor() NodeValue {
-	node := p.parsePrimary()
-	for p.currItem.typ == itemMult || p.currItem.typ == itemDiv {
+func (p *Parser) parseUnary() NodeValue {
+	if p.currItem.typ == itemPlus || p.currItem.typ == itemMinus {
 		op := OpType(p.currItem.typ)
 		p.nextItem()
-		node = NodeExprMath{Left: node, Op: op, Right: p.parsePrimary()}
+		operand := p.parseUnary()
+		return NodeExprMath{Left: NodeLiteralNumber(0), Op: op, Right: operand}
 	}
-	return node
+	return p.parsePrimary()
 }
 
 func (p *Parser) parsePrimary() NodeValue {

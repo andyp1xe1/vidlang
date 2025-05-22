@@ -40,7 +40,7 @@ func main() {
 	}
 
 	if err := interpreter.Interpret(script, debug); err != nil {
-		log.Fatalf("Failed to interpret script: %s", err)
+		log.Fatalf("Failed to interpret script: %v", err)
 	}
 }
 
