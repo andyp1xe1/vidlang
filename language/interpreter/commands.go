@@ -12,9 +12,10 @@ import (
 type cmdHandler func(*Context, *Stream, []parser.NodeValue) (*Stream, bool, error)
 
 var handlerMap = map[string]cmdHandler{
-	"open":     cmdOpen,
-	"export":   cmdExport,
-	"contrast": cmdContrast,
+	"open":       cmdOpen,
+	"export":     cmdExport,
+	"contrast":   cmdContrast,
+	"brightness": cmdBrightness,
 }
 
 // Mock for testing
@@ -35,6 +36,27 @@ func cmdContrast(ctx *Context, input *Stream, args []parser.NodeValue) (*Stream,
 	return &Stream{
 		FFStream: input.FFStream.Filter(
 			"eq", ffmpeg.Args{fmt.Sprintf("contrast=%v", boxToPrimitive(contrast))}),
+		Type: input.Type,
+	}, canCopy, nil
+}
+
+func cmdBrightness(ctx *Context, input *Stream, args []parser.NodeValue) (*Stream, bool, error) {
+	canCopy := false
+	if ctx.debug {
+		fmt.Printf("Brightness: %v\n", args)
+	}
+	if len(args) != 1 {
+		return nil, canCopy, fmt.Errorf("command brightness requires exactly 1 argument")
+	}
+	brightness, err := getArg(ctx, args[0], ValueNumber)
+	if err != nil {
+		return nil, canCopy, fmt.Errorf(
+			"command brightness requires a number argument but: %v", err)
+	}
+	//input.UseCopy = false
+	return &Stream{
+		FFStream: input.FFStream.Filter(
+			"eq", ffmpeg.Args{fmt.Sprintf("brightness=%v", boxToPrimitive(brightness))}),
 		Type: input.Type,
 	}, canCopy, nil
 }
@@ -100,13 +122,25 @@ func cmdExport(env *Context, _ *Stream, args []parser.NodeValue) (*Stream, bool,
 	}
 
 	ffargs := make(ffmpeg.KwArgs)
+	ffStreamArgs := make(ffmpeg.KwArgs)
 	if canCopy {
 		ffargs["c"] = "copy"
+		ffStreamArgs["c"] = "copy"
 	}
-	outputStream := input.FFStream.Output(outputFile, ffargs)
+
+	// -preset ultrafast -tune zerolatency -b:v 1M -f mpegts "udp://127.0.0.1:1234"
+	ffStreamArgs["tune"] = "zerolatency"
+	ffStreamArgs["preset"] = "ultrahigh"
+	ffStreamArgs["f"] = "mpegts"
+	//ffStreamArgs["b:v"] = "1M"
+
+	split := input.FFStream.Split()
+	outputStream := split.Get("0").Output(outputFile, ffargs)
+	udpStream := split.Get("1").Output("udp://127.0.0.1:1234", ffStreamArgs)
+	final := ffmpeg.MergeOutputs(outputStream, udpStream)
 
 	var errBuf strings.Builder
-	err = outputStream.ErrorToStdOut().WithErrorOutput(&errBuf).Run()
+	err = final.ErrorToStdOut().WithErrorOutput(&errBuf).Run()
 	if err != nil {
 		ffmpegOutput := errBuf.String()
 		return nil, canCopy, fmt.Errorf("export failed: %w\nFFmpeg output:\n%s", err, ffmpegOutput)
