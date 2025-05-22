@@ -35,9 +35,9 @@ The server component was initially planned (and works) but is no longer required
 
 The DSL is located in the `language` package, which has 2 main submodules
 
-![VidLang Activity Diagram](./resources/diagram.png)
-
-This Activity diagram showcases the interactions between components.
+<!-- ![VidLang Activity Diagram](./resources/diagram.png) -->
+<!---->
+<!-- This Activity diagram showcases the interactions between components. -->
 
 ### Parser
 Lexes and parses the script.
@@ -103,4 +103,8 @@ ffplay udp://127.0.0.1:1234
 
 ## Showcase
 
-...
+The following figure shows how the editing workflow looks. The editor writes commands in their editor of choice (right pane), and after a very fast preview export, they see the approximated result in their UDP-capable video player of choice. Editing and adjusting filter values and seeing how they look is seamless:
+
+![Editing and live preview workflow](./resources/preview.png)
+
+In the demo, we used **neovim** as the code editor and **ffplay** as the preview player. Here, we increased brightness and contrast both by 20%.
