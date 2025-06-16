@@ -164,21 +164,24 @@ func isStrOperator(s string) bool {
 }
 
 var commands = map[string]itemType{
-	"brightness": itemBrigtness,
-	"concat":     itemConcat,
-	"contrast":   itemContrast,
-	"crossfade":  itemCrossfade,
-	"cut":        itemCut,
-	"export":     itemExport,
+	"concat":     itemConcat, //  [ ]
+	"cut":        itemCut, // [ ]
+	"volume":     itemVolume, // [ ]
+
+	"saturation": itemSaturation, // x
+	"contrast":   itemContrast, // X
+	"export":     itemExport, // x
+	"open":       itemOpen, // x
+	"brightness": itemBrigtness, // x
+
 	"fade":       itemFade,
+	"crossfade":  itemCrossfade, 
 	"hue":        itemHue,
-	"map":        itemMap,
-	"open":       itemOpen,
 	"pitch":      itemPitch,
-	"saturation": itemSaturation,
 	"speed":      itemSpeed,
-	"trackline":  itemTrackLine,
-	"volume":     itemVolume,
+
+	"trackline":  itemTrackLine, // --
+	"map":        itemMap, // --
 }
 
 func isCommand(s string) bool {

@@ -2,10 +2,10 @@ package interpreter
 
 import (
 	"fmt"
+	"log"
 	"strings"
 
 	"github.com/andyp1xe1/vidlang/language/parser"
-	ffmpeg "github.com/u2takey/ffmpeg-go"
 )
 
 // StreamType represents the type of media stream
@@ -20,8 +20,7 @@ const (
 type valueType int
 
 const (
-	ValueStream valueType = iota
-	ValueBool
+	ValueBool = iota
 	ValueNumber
 	ValueString
 	ValueList
@@ -33,94 +32,25 @@ type ValueBox struct {
 	typ valueType
 }
 
-// Stream represents a media stream in our DSL
-type Stream struct {
-	FFStream *ffmpeg.Stream
-	Type     StreamType
-}
-
-type SplitNode struct {
-	*ffmpeg.Node
-	StreamType
-}
-
-type StreamList []*Stream
-
-type streamStore struct {
-	splitNodes     map[parser.NodeIdent]*SplitNode
-	canCopyStreams map[parser.NodeIdent]*Stream
-	splitCounts    map[parser.NodeIdent]int
-}
-
-func newStreamStore() streamStore {
-	return streamStore{
-		splitNodes:     make(map[parser.NodeIdent]*SplitNode),
-		canCopyStreams: make(map[parser.NodeIdent]*Stream),
-		splitCounts:    make(map[parser.NodeIdent]int),
-	}
-}
-
-func (s streamStore) getAuto(name parser.NodeIdent) (*Stream, bool, error) {
-	stream, ok := s.canCopyStreams[name]
-	if ok {
-		return stream, true, nil
-	}
-	stream, err := s.getSplit(name)
-	if err != nil {
-		return nil, false, err
-	}
-	fmt.Printf("split count: %v\n", s.splitCounts[name])
-	s.splitCounts[name] = s.splitCounts[name] + 1
-	return stream, false, nil
-
-}
-
-func (s streamStore) getSplit(name parser.NodeIdent) (*Stream, error) {
-	fnode, ok := s.splitNodes[name]
-	if !ok {
-		return nil, fmt.Errorf("stream variable %s not defined", name)
-	}
-	stream := &Stream{
-		FFStream: fnode.Get(fmt.Sprintf("%v", s.splitCounts)),
-		Type:     fnode.StreamType,
-	}
-	s.splitCounts[name] = s.splitCounts[name] + 1
-	return stream, nil
-}
-
-func (s streamStore) set(name parser.NodeIdent, stream *Stream, canCopy bool) {
-	if canCopy {
-		s.canCopyStreams[name] = stream
-	}
-	s.splitNodes[name] = &SplitNode{stream.FFStream.Split(), stream.Type}
-	s.splitCounts[name] = 0
-}
-
 // Context holds the running state of the interpreter
 type Context struct {
-	variables    map[parser.NodeIdent]ValueBox
-	streams      streamStore
-	scopeGStream *Stream
-	exports      map[*parser.NodeList[parser.Node]]*Stream // TODO track export streams for bulk exporting
-	debug        bool
+	variables map[parser.NodeIdent]ValueBox
+	streams   streamStore
+	debug     bool
 }
 
 // NewContext creates a new interpreter context
 func NewContext(debug bool) *Context {
 	return &Context{
-		variables:    make(map[parser.NodeIdent]ValueBox),
-		streams:      newStreamStore(),
-		scopeGStream: nil,
-		debug:        debug,
+		variables: make(map[parser.NodeIdent]ValueBox),
+		streams:   newStreamStore(),
+		debug:     debug,
 	}
 }
 
 func (c *Context) getVar(name parser.NodeIdent) (ValueBox, error) {
 	if name == "stream" {
-		if c.scopeGStream == nil {
-			return ValueBox{}, fmt.Errorf("global stream is not set")
-		}
-		return ValueBox{c.scopeGStream, ValueStream}, nil
+		return ValueBox{}, fmt.Errorf("global stream is not a box value")
 	}
 
 	val, ok := c.variables[name]
@@ -199,11 +129,11 @@ func evaluate(ctx *Context, node parser.Node) error {
 	case parser.NodeAssign:
 		return evaluateAssignment(ctx, n)
 	case parser.NodeExpr:
-		stream, _, err := evaluateExpression(ctx, n) // TODO factor canCopy in Stream??
+		entry, canCp, err := evaluateExpression(ctx, n) // TODO factor canCopy in Stream??
 		if err != nil {
 			return err
 		}
-		ctx.scopeGStream = stream
+		ctx.streams.set("stream", entry, canCp)
 		return nil
 	case parser.AstError:
 		return fmt.Errorf("interpreter error: %v", n.Error())
@@ -219,22 +149,22 @@ func evaluateAssignment(ctx *Context, node parser.NodeAssign) error {
 		return fmt.Errorf("invalid assignment: no destination")
 	}
 
-	var stream *Stream
+	var entry interface{}
 	var canCopy bool
 	var err error
 	if value, ok := node.Value.(parser.NodeExpr); ok {
-		stream, canCopy, err = evaluateExpression(ctx, value)
+		entry, canCopy, err = evaluateExpression(ctx, value)
 		if err != nil {
 			return err
 		}
-		ctx.streams.set(node.Dest[0], stream, canCopy)
+		ctx.streams.set(node.Dest[0], entry, canCopy)
 	}
 
 	if len(node.Dest) > 1 {
 		return fmt.Errorf("cannot assign stream to multiple variables for now")
 	}
 
-	if stream == nil {
+	if entry == nil {
 		ctx.setLiteral(node.Dest[0], node.Value)
 	}
 
@@ -242,13 +172,13 @@ func evaluateAssignment(ctx *Context, node parser.NodeAssign) error {
 }
 
 // evaluateExpression evaluates an expression node
-func evaluateExpression(ctx *Context, expr parser.NodeExpr) (*Stream, bool, error) {
-	var stream *Stream
+func evaluateExpression(ctx *Context, expr parser.NodeExpr) (StreamList, bool, error) {
+	var entry interface{}
 	var canCopy, canPipelieCp = true, true
 	var err error
 
 	if len(expr.Input) > 1 {
-		return nil, false, fmt.Errorf("multiple inputs not supported yet")
+		return nil, false, fmt.Errorf("multiple literal inputs not supported yet")
 	}
 
 	if len(expr.Input) == 1 {
@@ -257,20 +187,22 @@ func evaluateExpression(ctx *Context, expr parser.NodeExpr) (*Stream, bool, erro
 		if !ok {
 			return nil, false, fmt.Errorf("invalid input type: %T", input)
 		}
-		if stream, canCopy, err = ctx.streams.getAuto(v); err != nil {
+		if entry, canCopy, err = ctx.streams.getAuto(v); err != nil {
 			return nil, false, err
 		}
 	}
-	stream, canPipelieCp, err = evaluatePipeline(ctx, expr.Pipeline, stream)
+
+	streams, canPipelieCp, err := evaluatePipeline(ctx, expr.Pipeline, entry)
 	canCopy = canCopy && canPipelieCp
-	return stream, canCopy, err
+	return streams, canCopy, err
 }
 
-func evaluatePipeline(ctx *Context, pipeline parser.NodePipeline, stream *Stream) (*Stream, bool, error) {
+func evaluatePipelineThread(ctx *Context, pipeline parser.NodePipeline, stream *Stream) (*Stream, bool, error) {
 
 	canCopy := true
 
 	for _, cmd := range pipeline {
+		log.Println("thread cmd", cmd)
 		var err error
 		var canCmdCp bool
 		stream, canCmdCp, err = evaluateCommand(ctx, cmd, stream)
@@ -283,10 +215,87 @@ func evaluatePipeline(ctx *Context, pipeline parser.NodePipeline, stream *Stream
 	return stream, canCopy, nil
 }
 
+func evaluatePipeline(ctx *Context, pipeline parser.NodePipeline, entry interface{}) (StreamList, bool, error) {
+	streams := entryToList(entry)
+	// if len(streams) == 0 {
+	// 	return []*Stream{}, false, nil
+	// }
+	
+	var err error
+	first := pipeline[0]
+	if first.Name == "open" {
+		if streams, err = cmdOpen(ctx, first.Args); err != nil {
+			return StreamList{}, false, err
+		}
+		pipeline = pipeline[1:]
+	}
+
+	results := make([]*Stream, 0, len(streams))
+	var canCopy bool 
+
+	if len(streams) == 0 {
+		result, cp, err := evaluatePipelineThread(ctx, pipeline, nil)
+		if err != nil {
+			return nil, false, err
+		}
+		results = append(results, result)
+		canCopy = cp
+
+		return results, canCopy, nil
+	}
+	for _, stream := range streams {
+		result, cp, err := evaluatePipelineThread(ctx, pipeline, stream)
+		if err != nil {
+			return nil, false, err
+		}
+		results = append(results, result)
+		canCopy = cp
+	}
+
+	return results, canCopy, nil
+}
+
 // evaluateCommand evaluates a command node
 func evaluateCommand(ctx *Context, cmd parser.NodeCommand, input *Stream) (*Stream, bool, error) {
 	if handler, ok := handlerMap[cmd.Name]; ok {
+		if ctx.debug {
+			log.Println("command: ", cmd)
+		}
 		return handler(ctx, input, cmd.Args)
 	}
 	return nil, false, fmt.Errorf("unknown command: %s", cmd.Name)
+}
+
+func applyCommandOnList(cmd cmdHandler, ctx *Context, input []*Stream, args []parser.NodeValue) ([]*Stream, bool, error) {
+
+	outpt := make([]*Stream, 0)
+
+	var canCpy = true
+	var cp bool
+	var out *Stream
+	var err error
+
+	for _, in := range input {
+		if out, cp, err = cmd(ctx, in, args); err != nil {
+			return []*Stream{}, false, err
+		}
+
+		outpt = append(outpt, out)
+		canCpy = canCpy && cp
+	}
+
+	return outpt, canCpy, nil
+}
+
+func entryToList(entry interface{}) StreamList {
+	if entry == nil {
+		return StreamList{&Stream{}}
+	}
+	streams := make(StreamList, 0)
+	var ok bool
+	if streams, ok = entry.(StreamList); !ok {
+		s := entry.(*Stream)
+		streams = append(streams, s)
+	}
+	return streams
 }

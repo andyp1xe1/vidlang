@@ -1,0 +1,11 @@
+# dsadas
+
+vidfile := "./server/"
+outfile := "output.mp4"
+
+tracks := open vidfile
+tracks2 := tracks
+    |> contrast 0.5
+    |> brightness -0.2
+
+export tracks2 outfile
