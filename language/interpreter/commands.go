@@ -19,12 +19,80 @@ var handlerMap = map[string]cmdHandler{
 	"brightness": cmdBrightness,
 	"saturation": cmdSaturation,
 	"gamma": cmdGamma,
-	"cut": cmdCut,
+	"cut": cmdTrim,
 	"concat": cmdConcat,
 }
 
-func cmdCut(ctx *Context, input *Stream, args []parser.NodeValue) (*Stream, bool, error) { panic("unimplemented") }
-func cmdConcat(ctx *Context, input *Stream, args []parser.NodeValue) (*Stream, bool, error) { panic("unimplemented") }
+func cmdTrim(ctx *Context, input *Stream, args []parser.NodeValue) (*Stream, bool, error) {
+	canCopy := false
+	if ctx.debug {
+		fmt.Printf("trim: %v\n", args)
+	}
+	
+	if len(args) != 2 {
+		return nil, canCopy, fmt.Errorf("command trim requires exactly 2 arguments (start and end)")
+	}
+	
+	start, err := getArg(ctx, args[0], ValueNumber)
+	if err != nil {
+		return nil, canCopy, fmt.Errorf("trim command requires a number for start time but: %v", err)
+	}
+	
+	end, err := getArg(ctx, args[1], ValueNumber)
+	if err != nil {
+		return nil, canCopy, fmt.Errorf("trim command requires a number for end time but: %v", err)
+	}
+	
+	startVal := boxToPrimitive(start).(float64)
+	endVal := boxToPrimitive(end).(float64)
+
+	input.FFStream.Audio()
+	input.FFStream.Video()
+	
+	v := input.FFStream.Trim(ffmpeg.KwArgs{
+			"start": startVal,
+			"end":   endVal,
+		}).Filter("setpts", ffmpeg.Args{"PTS-STARTPTS"}).Filter("fps", ffmpeg.Args{"30"})
+
+		return &Stream{FFStream: v}, canCopy, err
+}
+
+func cmdConcat(ctx *Context, input *Stream, args []parser.NodeValue) (*Stream, bool, error) {
+	canCopy := false
+	if ctx.debug {
+		fmt.Printf("concat: %v\n", args)
+	}
+	
+	if len(args) == 0 {
+		return nil, canCopy, fmt.Errorf("concat command requires at least one stream argument")
+	}
+	
+	// // Collect all streams to concatenate
+	// streams := []*ffmpeg.Stream{input.FFStream}
+	
+	streams := make([]*ffmpeg.Stream, 0)
+	
+	for _, arg := range args {
+		stream, _, err := getStreamArg(ctx, arg)
+		if err != nil {
+			return nil, canCopy, fmt.Errorf("concat argument must be a stream but: %v", err)
+		}
+		
+		streamList := entryToList(stream)
+		if len(streamList) != 1 {
+			return nil, canCopy, fmt.Errorf("concat currently only supports single streams per argument")
+		}
+		
+		streams = append(streams, streamList[0].FFStream)
+	}
+	
+	// Use ffmpeg-go's Concat function
+	concatStream := ffmpeg.Concat(streams)
+	
+	return &Stream{
+		FFStream: concatStream,
+	}, canCopy, nil
+}
 
 func cmdSaturation(ctx *Context, input *Stream, args []parser.NodeValue) (*Stream, bool, error) {
 	canCopy := false
@@ -241,19 +309,41 @@ func cmdExport(env *Context, _ *Stream, args []parser.NodeValue) (*Stream, bool,
 
 		ffargs := make(ffmpeg.KwArgs)
 		ffStreamArgs := make(ffmpeg.KwArgs)
-		if canCopy {
-			ffargs["c"] = "copy"
-			ffStreamArgs["c"] = "copy"
-		}
 
+		if !canCopy {
+		    ffargs["c:v"] = "libx264"
+		    ffargs["c:a"] = "aac"
+		} else if !env.preview {
+		    ffargs["c"] = "copy"
+		    ffargs["c"] = "copy"
+				ffStreamArgs["c"] = "copy"
+		}
+		
 		ffStreamArgs["tune"] = "zerolatency"
 		ffStreamArgs["preset"] = "ultrahigh"
 		ffStreamArgs["f"] = "mpegts"
 
-		split := stream.FFStream.Split()
-		outputStream := split.Get("0").Output(currentOutput, ffargs)
-		udpStream := split.Get("1").Output("udp://127.0.0.1:1234", ffStreamArgs)
-		final := ffmpeg.MergeOutputs(outputStream, udpStream)
+		ffargs["fflags"] = "+genpts"
+		// ffargs["map"] = "0:a"
+		// ffStreamArgs["map"] = "0:a"
+
+		var outputs []*ffmpeg.Stream = make([]*ffmpeg.Stream, 0)
+		if env.preview {
+
+			if err := env.StartPreviewPlayer(); err != nil {
+				log.Printf("Warning: Failed to start preview player: %v", err)
+			}
+
+			split := stream.FFStream.Split()
+			outputStream := split.Get("0").Output(currentOutput, ffargs)
+			udpStream := split.Get("1").Output("udp://127.0.0.1:1234", ffStreamArgs)
+			outputs = append(outputs, outputStream, udpStream)
+		} else {
+			out := stream.FFStream.Output(currentOutput, ffargs)
+			outputs = append(outputs, out)
+		}
+
+		final := ffmpeg.MergeOutputs(outputs...)
 
 		var errBuf strings.Builder
 		err = final.ErrorToStdOut().WithErrorOutput(&errBuf).Run()
@@ -274,6 +364,7 @@ func getStreamArg(env *Context, arg parser.NodeValue) (interface{}, bool, error)
 	if arg.ValueType() == parser.ValueIdentifier {
 		return env.streams.getAuto(arg.(parser.NodeIdent))
 	}
+	// log.Println("Type: ", arg.ValueType())
 	return nil, false, fmt.Errorf("expected an identifier but got %s", arg)
 }
 

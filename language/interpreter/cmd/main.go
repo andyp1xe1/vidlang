@@ -15,9 +15,11 @@ func main() {
 	var fileName string
 	var useStdin bool
 	var debug bool
+	var preview bool
 	flag.StringVar(&fileName, "script", "", "script file to parse")
 	flag.BoolVar(&useStdin, "stdin", false, "read script from stdin")
 	flag.BoolVar(&debug, "debug", false, "enable debug mode")
+	flag.BoolVar(&preview, "preview", false, "enable debug mode")
 
 	flag.Parse()
 
@@ -39,7 +41,7 @@ func main() {
 		}
 	}
 
-	if err := interpreter.Interpret(script, debug); err != nil {
+	if err := interpreter.Interpret(script, debug, preview); err != nil {
 		log.Fatalf("Failed to interpret script: %v", err)
 	}
 }

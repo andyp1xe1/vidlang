@@ -3,6 +3,7 @@ package interpreter
 import (
 	"fmt"
 	"log"
+	"os/exec"
 	"strings"
 
 	"github.com/andyp1xe1/vidlang/language/parser"
@@ -10,12 +11,6 @@ import (
 
 // StreamType represents the type of media stream
 type StreamType int
-
-const (
-	VideoStream StreamType = iota
-	AudioStream
-	MultiStream
-)
 
 type valueType int
 
@@ -34,18 +29,47 @@ type ValueBox struct {
 
 // Context holds the running state of the interpreter
 type Context struct {
-	variables map[parser.NodeIdent]ValueBox
-	streams   streamStore
-	debug     bool
+	variables  map[parser.NodeIdent]ValueBox
+	streams    streamStore
+	debug      bool
+	preview    bool
+	previewCmd *exec.Cmd
 }
 
 // NewContext creates a new interpreter context
-func NewContext(debug bool) *Context {
+func NewContext(debug, preview bool) *Context {
 	return &Context{
 		variables: make(map[parser.NodeIdent]ValueBox),
 		streams:   newStreamStore(),
 		debug:     debug,
+		preview:   preview,
 	}
+}
+
+// StartPreviewPlayer launches ffplay to display the UDP stream
+// func (c *Context) StartPreviewPlayer() error {
+// 	// Kill any existing preview process
+// 	if c.previewCmd != nil && c.previewCmd.Process != nil {
+// 		c.previewCmd.Process.Kill()
+// 	}
+//
+// 	// Launch ffplay to display the UDP stream
+// 	c.previewCmd = exec.Command("setsid", "ffplay", "-fflags", "nobuffer", "-flags", "low_delay", "-framedrop", "-i", "udp://127.0.0.1:1234")
+//
+// 	// Run in background
+// 	return c.previewCmd.Start()
+// }
+
+func (c *Context) StartPreviewPlayer() error {
+	// check if ffplay is already running our specific stream
+	cmd := exec.Command("pgrep", "-f", "ffplay.*udp://127.0.0.1:1234")
+	if err := cmd.Run(); err == nil {
+		return nil // already running
+	}
+
+	// not running, start it
+	c.previewCmd = exec.Command("setsid", "ffplay", "-fflags", "nobuffer", "-flags", "low_delay", "-framedrop", "-i", "udp://127.0.0.1:1234")
+	return c.previewCmd.Start()
 }
 
 func (c *Context) getVar(name parser.NodeIdent) (ValueBox, error) {
@@ -102,12 +126,12 @@ type Interpreter struct {
 	parser *parser.Parser
 }
 
-func Interpret(code string, debug bool) error {
+func Interpret(code string, debug, preview bool) error {
 	parser := parser.Parse(code, false)
 
 	i := &Interpreter{
 		parser: parser,
-		ctx:    NewContext(debug),
+		ctx:    NewContext(debug, preview),
 	}
 
 	return i.run()
@@ -220,7 +244,7 @@ func evaluatePipeline(ctx *Context, pipeline parser.NodePipeline, entry interfac
 	// if len(streams) == 0 {
 	// 	return []*Stream{}, false, nil
 	// }
-	
+
 	var err error
 	first := pipeline[0]
 	if first.Name == "open" {
@@ -231,7 +255,7 @@ func evaluatePipeline(ctx *Context, pipeline parser.NodePipeline, entry interfac
 	}
 
 	results := make([]*Stream, 0, len(streams))
-	var canCopy bool 
+	var canCopy bool
 
 	if len(streams) == 0 {
 		result, cp, err := evaluatePipelineThread(ctx, pipeline, nil)

@@ -1,6 +1,6 @@
 # dsadas
 
-vidfile := "./server/"
+vidfile := "./testdir"
 outfile := "output.mp4"
 
 tracks := open vidfile
