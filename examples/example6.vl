@@ -1,22 +1,12 @@
+#!/home/nomad/go/bin/vidlang -script
 
-# Example of trim and concat operations
-vidfile := "./testdir/screencast.mp4"
-outfile := "result.mp4"
+vidfile := "./testdir"
+outfile := "./outdir/output.mp4"
 
-# Open the source video
-source := open vidfile
+tracks := open vidfile
+tracks2 := tracks
+    |> contrast 0.5
+    |> brightness +0.2
+    |> flip "v"
 
-# Create two trimmed segments
-# Parameters for trim are start and end time in seconds
-secondPart := source |> cut 10 20 # From 10s to 20s (10 seconds)
-firstPart := source |> cut 0 5    # First 5 seconds
-
-combined := concat firstPart secondPart
-
-final := combined 
-    |> brightness 0.1
-    |> contrast 1.2
-    |> saturation 0
-
-# Export the result
-export final outfile
+export tracks2 outfile

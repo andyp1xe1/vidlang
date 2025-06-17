@@ -1,11 +1,25 @@
-# dsadas
+#!/home/nomad/go/bin/vidlang -script
 
-vidfile := "./testdir"
-outfile := "output.mp4"
+vidfile := "./testdir/vid1.mp4"
+vidfile2 := "./testdir/vid2.mp4"
+vidfile3 := "./testdir/vid3.mp4"
 
-tracks := open vidfile
-tracks2 := tracks
-    |> contrast 0.5
-    |> brightness -0.2
+outfile := "result.mp4"
 
-export tracks2 outfile
+source := open vidfile
+source2 := open vidfile2
+source3 := open vidfile3
+
+secondPart := source |> cut 0 3 |> flip "h"
+firstPart := source2 |> cut 0 3 |> flip "v"
+thirdPart := source3 |> cut 0 3
+
+combined := concat secondPart firstPart thirdPart 
+
+final := combined 
+     |> brightness 0
+     |> contrast 0.8
+     |> saturation 1.2
+     |> hue 200
+
+export final outfile

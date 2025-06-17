@@ -13,10 +13,11 @@ The server component was initially planned (and works) but is no longer required
 .
 ├── go.mod
 ├── go.sum
+├── main.go
 ├── language
 │   ├── interpreter
-│   │   ├── cmd
 │   │   ├── commands.go
+│   │   ├── streamstore.go
 │   │   └── interpreter.go
 │   └── parser
 │       ├── ast.go
@@ -77,6 +78,7 @@ The interpreter has the following features:
 - Exporting with preview.  
   The export command has the ability to stream a preview while exporting to a udp socket.
   This stream can be played in real time by players such as `ffplay`, `mpv` and `vlc`.
+  Currently the `-preview` flag opens `ffplay`.
 
 #### Errors
 The interpreter handles errors by propagading lower level errors and it's own ones via classical Golang `err` return values.
@@ -87,19 +89,13 @@ Then these errors are intercepted at the main loop and reported to the user, abo
 Both the parser and interpreter are executable by their own if needed.
 to run the parser:
 ```bash
-go run ./language/parser/cmd/main.go --script <path to script>
+go run ./language/parser/cmd/main.go -script <path to script>
 ```
 
 To run the language itself:
 ```bash
-go run ./language/interpreter/cmd/main.go [--debug] --script <path to script>
+go run . [-debug] [-preview] -script <path to script>
 ```
-
-To preview the result:
-```bash
-ffplay udp://127.0.0.1:1234
-```
-
 
 ## Showcase
 
@@ -107,6 +103,6 @@ The following figure shows how the editing workflow looks.
 The editor writes commands in the editor of choice (the right pane), and after a very fast preview export they see the aproximated result in their UDP capable video player of choice. Editing and adjusting filter values and seeing how they look is as seamless as it can get:
 
 
-![Editing and live preview workflow](./resources/preview.png)
+![Editing and live preview workflow](./resources/demo.gif)
 
-In the demo, we used **neovim** as the code editor and **ffplay** as the preview player. Here, we increased brightness and contrast both by 20%.
+In the demo, we used **neovim** as the code editor and **ffplay** as the preview player.

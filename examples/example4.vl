@@ -1,6 +1,6 @@
 # Variable Assignments
 
-vidfile := "./testdir/screencast.mp4"
+vidfile := "./testdir/vid2.mp4"
 outfile := "output.mp4"
 
 track := open vidfile # track -> can copy

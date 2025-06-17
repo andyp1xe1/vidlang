@@ -87,6 +87,8 @@ const (
 	itemSpeed
 	itemTrackLine
 	itemVolume
+	itemGamma
+	itemFlip
 )
 
 func (i itemType) String() string {
@@ -164,24 +166,28 @@ func isStrOperator(s string) bool {
 }
 
 var commands = map[string]itemType{
-	"concat":     itemConcat, //  [ ]
-	"cut":        itemCut, // [ ]
-	"volume":     itemVolume, // [ ]
+	"volume": itemVolume, // [ ]
+
+
+	"concat": itemConcat, //  [x]
+	"cut":    itemCut,    // [x]
 
 	"saturation": itemSaturation, // x
-	"contrast":   itemContrast, // X
-	"export":     itemExport, // x
-	"open":       itemOpen, // x
-	"brightness": itemBrigtness, // x
+	"contrast":   itemContrast,   // X
+	"export":     itemExport,     // x
+	"open":       itemOpen,       // x
+	"brightness": itemBrigtness,  // x
+	"gamma": itemGamma, 					// X
+	"hue":       itemHue,         // X
+	"flip": itemFlip, 					  // X
 
-	"fade":       itemFade,
-	"crossfade":  itemCrossfade, 
-	"hue":        itemHue,
-	"pitch":      itemPitch,
-	"speed":      itemSpeed,
+	"fade":      itemFade,
+	"crossfade": itemCrossfade,
+	"pitch":     itemPitch,
+	"speed":     itemSpeed,
 
-	"trackline":  itemTrackLine, // --
-	"map":        itemMap, // --
+	"trackline": itemTrackLine, // --
+	"map":       itemMap,       // --
 }
 
 func isCommand(s string) bool {

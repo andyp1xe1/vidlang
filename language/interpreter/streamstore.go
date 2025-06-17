@@ -23,26 +23,26 @@ type SplitNode struct {
 	*ffmpeg.Node
 }
 
-func (n *SplitNode) split(c int) interface{}{
+func (n *SplitNode) split(c int) interface{} {
 	return &Stream{
 		FFStream: n.Get(fmt.Sprintf("%v", c)),
 	}
 }
 
-type SplitList struct{
+type SplitList struct {
 	list []*SplitNode
 }
 
 func (l *SplitList) split(c int) interface{} {
 	res := make(StreamList, 0)
 	for _, n := range l.list {
-    s := n.split(c).(*Stream)
+		s := n.split(c).(*Stream)
 		res = append(res, s)
 	}
 	return res
 }
 
-type storeNode interface{split(c int) interface{}}
+type storeNode interface{ split(c int) interface{} }
 
 type streamStore struct {
 	splitNodes     map[parser.NodeIdent]storeNode
@@ -87,10 +87,10 @@ func (s streamStore) set(name parser.NodeIdent, entry interface{}, canCopy bool)
 	if canCopy {
 		s.canCopyStreams[name] = entry
 	}
-	
+
 	if stream, ok := entry.(*Stream); ok {
 		s.splitNodes[name] = &SplitNode{stream.FFStream.Split()}
-	
+
 	} else if list, ok := entry.(StreamList); ok {
 
 		spList := SplitList{make([]*SplitNode, 0)}

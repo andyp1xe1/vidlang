@@ -18,9 +18,11 @@ var handlerMap = map[string]cmdHandler{
 	"contrast":   cmdContrast,
 	"brightness": cmdBrightness,
 	"saturation": cmdSaturation,
-	"gamma": cmdGamma,
-	"cut": cmdTrim,
-	"concat": cmdConcat,
+	"gamma":      cmdGamma,
+	"cut":        cmdTrim,
+	"concat":     cmdConcat,
+	"hue":        cmdHue,
+	"flip":       cmdFlip,
 }
 
 func cmdTrim(ctx *Context, input *Stream, args []parser.NodeValue) (*Stream, bool, error) {
@@ -28,33 +30,30 @@ func cmdTrim(ctx *Context, input *Stream, args []parser.NodeValue) (*Stream, boo
 	if ctx.debug {
 		fmt.Printf("trim: %v\n", args)
 	}
-	
+
 	if len(args) != 2 {
 		return nil, canCopy, fmt.Errorf("command trim requires exactly 2 arguments (start and end)")
 	}
-	
+
 	start, err := getArg(ctx, args[0], ValueNumber)
 	if err != nil {
 		return nil, canCopy, fmt.Errorf("trim command requires a number for start time but: %v", err)
 	}
-	
+
 	end, err := getArg(ctx, args[1], ValueNumber)
 	if err != nil {
 		return nil, canCopy, fmt.Errorf("trim command requires a number for end time but: %v", err)
 	}
-	
+
 	startVal := boxToPrimitive(start).(float64)
 	endVal := boxToPrimitive(end).(float64)
 
-	input.FFStream.Audio()
-	input.FFStream.Video()
-	
 	v := input.FFStream.Trim(ffmpeg.KwArgs{
-			"start": startVal,
-			"end":   endVal,
-		}).Filter("setpts", ffmpeg.Args{"PTS-STARTPTS"}).Filter("fps", ffmpeg.Args{"30"})
+		"start": startVal,
+		"end":   endVal,
+	}).Filter("setpts", ffmpeg.Args{"PTS-STARTPTS"}) //.Filter("fps", ffmpeg.Args{"30"})
 
-		return &Stream{FFStream: v}, canCopy, err
+	return &Stream{FFStream: v}, canCopy, err
 }
 
 func cmdConcat(ctx *Context, input *Stream, args []parser.NodeValue) (*Stream, bool, error) {
@@ -62,33 +61,42 @@ func cmdConcat(ctx *Context, input *Stream, args []parser.NodeValue) (*Stream, b
 	if ctx.debug {
 		fmt.Printf("concat: %v\n", args)
 	}
-	
+
 	if len(args) == 0 {
 		return nil, canCopy, fmt.Errorf("concat command requires at least one stream argument")
 	}
-	
+
 	// // Collect all streams to concatenate
 	// streams := []*ffmpeg.Stream{input.FFStream}
-	
+
 	streams := make([]*ffmpeg.Stream, 0)
-	
+
 	for _, arg := range args {
 		stream, _, err := getStreamArg(ctx, arg)
 		if err != nil {
 			return nil, canCopy, fmt.Errorf("concat argument must be a stream but: %v", err)
 		}
-		
+
 		streamList := entryToList(stream)
 		if len(streamList) != 1 {
 			return nil, canCopy, fmt.Errorf("concat currently only supports single streams per argument")
 		}
-		
+
 		streams = append(streams, streamList[0].FFStream)
 	}
-	
-	// Use ffmpeg-go's Concat function
-	concatStream := ffmpeg.Concat(streams)
-	
+
+	normalizedStreams := make([]*ffmpeg.Stream, len(streams))
+	for i, stream := range streams {
+		// normalize everything: resolution, framerate, aspect ratio
+		normalizedStreams[i] = stream.
+			Filter("scale", ffmpeg.Args{"1920:1080:force_original_aspect_ratio=decrease"})
+		// .Filter("pad", ffmpeg.Args{"1920:1080:(ow-iw)/2:(oh-ih)/2"}).
+		// Filter("fps", ffmpeg.Args{"25"}).
+		// Filter("setpts", ffmpeg.Args{"PTS-STARTPTS"})
+	}
+
+	concatStream := ffmpeg.Concat(normalizedStreams)
+
 	return &Stream{
 		FFStream: concatStream,
 	}, canCopy, nil
@@ -174,6 +182,54 @@ func cmdBrightness(ctx *Context, input *Stream, args []parser.NodeValue) (*Strea
 	}, canCopy, nil
 }
 
+func cmdHue(ctx *Context, input *Stream, args []parser.NodeValue) (*Stream, bool, error) {
+	canCopy := false
+	if ctx.debug {
+		fmt.Printf("hue: %v\n", args)
+	}
+	if len(args) != 1 {
+		return nil, canCopy, fmt.Errorf("command hue requires exactly 1 argument")
+	}
+	hue, err := getArg(ctx, args[0], ValueNumber)
+	if err != nil {
+		return nil, canCopy, fmt.Errorf(
+			"command hue requires a number argument but: %v", err)
+	}
+
+	return &Stream{
+		FFStream: input.FFStream.Hue(ffmpeg.KwArgs{"h": boxToPrimitive(hue)}),
+	}, canCopy, nil
+}
+
+func cmdFlip(ctx *Context, input *Stream, args []parser.NodeValue) (*Stream, bool, error) {
+	canCopy := false
+	if ctx.debug {
+		fmt.Printf("flip: %v\n", args)
+	}
+	if len(args) != 1 {
+		return nil, canCopy, fmt.Errorf("command flip  exactly 1 argument")
+	}
+	flip, err := getArg(ctx, args[0], ValueString)
+	if err != nil {
+		return nil, canCopy, fmt.Errorf(
+			"command flip requires a string argument but: %v", err)
+	}
+
+	if strings.Compare(boxToPrimitive(flip).(string), "h") != 0 && strings.Compare(boxToPrimitive(flip).(string), "v") != 0 {
+		return nil, false, fmt.Errorf("command requires either `h` or `v` as arguments")
+	}
+
+	if strings.Compare(boxToPrimitive(flip).(string), "h") == 0 {
+		return &Stream{
+			FFStream: input.FFStream.VFlip(),
+		}, canCopy, nil
+	} else {
+		return &Stream{
+			FFStream: input.FFStream.HFlip(),
+		}, canCopy, nil
+	}
+}
+
 // cmdOpen implements the 'open' command, not a handler
 func cmdOpen(ctx *Context, args []parser.NodeValue) ([]*Stream, error) {
 
@@ -218,37 +274,37 @@ func openDirectory(ctx *Context, dirPath string) ([]*Stream, error) {
 	}
 
 	streams := make([]*Stream, 0)
-	
+
 	// Scan for video files
 	for _, file := range files {
 		if file.IsDir() {
 			continue // Skip subdirectories
 		}
-		
+
 		filename := file.Name()
 		ext := strings.ToLower(getFileExtension(filename))
-		
+
 		// Check if it's a video file
 		if ext == ".mp4" || ext == ".mkv" {
 			fullPath := fmt.Sprintf("%s/%s", dirPath, filename)
-			
+
 			ffStream := ffmpeg.Input(fullPath)
 			stream := &Stream{
 				FFStream: ffStream,
 			}
-			
+
 			streams = append(streams, stream)
-			
+
 			if ctx.debug {
 				fmt.Printf("Opened file from directory: %s\n", fullPath)
 			}
 		}
 	}
-	
+
 	if len(streams) == 0 {
 		return nil, fmt.Errorf("no video files found in directory: %s", dirPath)
 	}
-	
+
 	return streams, nil
 }
 
@@ -260,11 +316,10 @@ func getFileExtension(filename string) string {
 	return filename[idx:]
 }
 
-
 // cmdExport implements the 'export' command
 func cmdExport(env *Context, _ *Stream, args []parser.NodeValue) (*Stream, bool, error) {
 
-	if env.debug { 
+	if env.debug {
 		log.Println("exporting")
 	}
 
@@ -311,21 +366,23 @@ func cmdExport(env *Context, _ *Stream, args []parser.NodeValue) (*Stream, bool,
 		ffStreamArgs := make(ffmpeg.KwArgs)
 
 		if !canCopy {
-		    ffargs["c:v"] = "libx264"
-		    ffargs["c:a"] = "aac"
+			ffargs["c:v"] = "libx264"
+			ffargs["c:a"] = "aac"
 		} else if !env.preview {
-		    ffargs["c"] = "copy"
-		    ffargs["c"] = "copy"
-				ffStreamArgs["c"] = "copy"
+			ffargs["c"] = "copy"
+			ffStreamArgs["c"] = "copy"
 		}
-		
-		ffStreamArgs["tune"] = "zerolatency"
-		ffStreamArgs["preset"] = "ultrahigh"
-		ffStreamArgs["f"] = "mpegts"
 
+		ffStreamArgs["tune"] = "zerolatency"
+		ffStreamArgs["preset"] = "ultrafast"
+		ffStreamArgs["f"] = "mpegts"
+		ffStreamArgs["r"] = "24"
+		//ffStreamArgs["s"] = "1280x720"
+
+		ffargs["r"] = "30"
+		ffargs["s"] = "1920x1080"
 		ffargs["fflags"] = "+genpts"
-		// ffargs["map"] = "0:a"
-		// ffStreamArgs["map"] = "0:a"
+		ffargs["y"] = ""
 
 		var outputs []*ffmpeg.Stream = make([]*ffmpeg.Stream, 0)
 		if env.preview {
