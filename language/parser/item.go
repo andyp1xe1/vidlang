@@ -89,6 +89,7 @@ const (
 	itemVolume
 	itemGamma
 	itemFlip
+	itemStack
 )
 
 func (i itemType) String() string {
@@ -180,6 +181,7 @@ var commands = map[string]itemType{
 	"gamma": itemGamma, 					// X
 	"hue":       itemHue,         // X
 	"flip": itemFlip, 					  // X
+	"stack": itemStack,           // X
 
 	"fade":      itemFade,
 	"crossfade": itemCrossfade,

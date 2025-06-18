@@ -4,12 +4,6 @@ vidfile := "./testdir/vid2.mp4"
 outfile := "output.mp4"
 
 track := open vidfile # track -> can copy
-#track2 := track 
-    # |> contrast 0.5
-    # |> brightness -0.2 # track2 -> no copy / mb split
-#track3 := track |> trim "00:00:00" "00:01:00" # track3 -> can copy
-
-#final := concat track2 track3 # no copy
 
 # export track outfile
 export track "marcelo.mp4"

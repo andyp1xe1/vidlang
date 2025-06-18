@@ -10,16 +10,16 @@ source := open vidfile
 source2 := open vidfile2
 source3 := open vidfile3
 
-secondPart := source |> cut 0 3 |> flip "h"
+secondPart := source |> cut 0 3 |> flip "v"
 firstPart := source2 |> cut 0 3 |> flip "v"
-thirdPart := source3 |> cut 0 3
+thirdPart := source3 |> cut 0 3 |> stack "v" firstPart |> stack "h" secondPart
 
-combined := concat secondPart firstPart thirdPart 
+combined := concat thirdPart firstPart secondPart
 
 final := combined 
      |> brightness 0
      |> contrast 0.8
      |> saturation 1.2
-     |> hue 200
+     # |> hue 20
 
 export final outfile

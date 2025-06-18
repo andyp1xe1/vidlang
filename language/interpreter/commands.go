@@ -23,6 +23,7 @@ var handlerMap = map[string]cmdHandler{
 	"concat":     cmdConcat,
 	"hue":        cmdHue,
 	"flip":       cmdFlip,
+	"stack":      cmdStack,
 }
 
 func cmdTrim(ctx *Context, input *Stream, args []parser.NodeValue) (*Stream, bool, error) {
@@ -89,10 +90,9 @@ func cmdConcat(ctx *Context, input *Stream, args []parser.NodeValue) (*Stream, b
 	for i, stream := range streams {
 		// normalize everything: resolution, framerate, aspect ratio
 		normalizedStreams[i] = stream.
-			Filter("scale", ffmpeg.Args{"1920:1080:force_original_aspect_ratio=decrease"})
-		// .Filter("pad", ffmpeg.Args{"1920:1080:(ow-iw)/2:(oh-ih)/2"}).
-		// Filter("fps", ffmpeg.Args{"25"}).
-		// Filter("setpts", ffmpeg.Args{"PTS-STARTPTS"})
+			Filter("scale", ffmpeg.Args{"1920:1080:force_original_aspect_ratio=decrease"}).
+			Filter("pad", ffmpeg.Args{"1920:1080:(ow-iw)/2:(oh-ih)/2"}).
+			Filter("setpts", ffmpeg.Args{"PTS-STARTPTS"})
 	}
 
 	concatStream := ffmpeg.Concat(normalizedStreams)
@@ -228,6 +228,84 @@ func cmdFlip(ctx *Context, input *Stream, args []parser.NodeValue) (*Stream, boo
 			FFStream: input.FFStream.HFlip(),
 		}, canCopy, nil
 	}
+}
+
+func cmdStack(ctx *Context, input *Stream, args []parser.NodeValue) (*Stream, bool, error) {
+	canCopy := false
+	if ctx.debug {
+		fmt.Printf("stack: %v\n", args)
+	}
+
+	if len(args) < 2 {
+		return nil, canCopy, fmt.Errorf("stack command requires at least 2 arguments (direction and 1+ streams)")
+	}
+
+	// Get direction argument (first arg)
+	direction, err := getArg(ctx, args[0], ValueString)
+	if err != nil {
+		return nil, canCopy, fmt.Errorf("stack command requires a string for direction but: %v", err)
+	}
+
+	directionStr := boxToPrimitive(direction).(string)
+	if directionStr != "h" && directionStr != "v" {
+		return nil, canCopy, fmt.Errorf("stack direction must be 'h' (horizontal) or 'v' (vertical)")
+	}
+
+	// Collect all streams to stack (starting from second arg)
+	streams := make([]*ffmpeg.Stream, 0)
+
+	// Add the input stream first
+	streams = append(streams, input.FFStream)
+
+	// Add all the streams from arguments
+	for i := 1; i < len(args); i++ {
+		stream, _, err := getStreamArg(ctx, args[i])
+		if err != nil {
+			return nil, canCopy, fmt.Errorf("stack argument %d must be a stream but: %v", i+1, err)
+		}
+
+		streamList := entryToList(stream)
+		if len(streamList) != 1 {
+			return nil, canCopy, fmt.Errorf("stack currently only supports single streams per argument")
+		}
+
+		streams = append(streams, streamList[0].FFStream)
+	}
+
+	// Normalize all streams to same dimensions to avoid squashing
+	normalizedStreams := make([]*ffmpeg.Stream, len(streams))
+
+	if directionStr == "h" {
+		// For horizontal stacking, normalize to same height (1080p), keep aspect ratio
+		for i, stream := range streams {
+			normalizedStreams[i] = stream.
+				Filter("scale", ffmpeg.Args{"-1:1080:force_original_aspect_ratio=decrease"}).
+				Filter("pad", ffmpeg.Args{"iw:1080:(iw-ow)/2:(ih-oh)/2"}).
+				Filter("setsar", ffmpeg.Args{"1:1"})
+		}
+	} else {
+		// For vertical stacking, normalize to same width (1920px), keep aspect ratio
+		for i, stream := range streams {
+			normalizedStreams[i] = stream.
+				Filter("scale", ffmpeg.Args{"1920:-1:force_original_aspect_ratio=decrease"}).
+				Filter("pad", ffmpeg.Args{"1920:ih:(iw-ow)/2:(ih-oh)/2"}).
+				Filter("setsar", ffmpeg.Args{"1:1"})
+		}
+	}
+
+	// Apply the appropriate stack filter
+	var stackedStream *ffmpeg.Stream
+	if directionStr == "h" {
+		// Horizontal stack (side by side)
+		stackedStream = ffmpeg.Filter(normalizedStreams, "hstack", ffmpeg.Args{fmt.Sprintf("inputs=%d", len(normalizedStreams))})
+	} else {
+		// Vertical stack (one above the other)
+		stackedStream = ffmpeg.Filter(normalizedStreams, "vstack", ffmpeg.Args{fmt.Sprintf("inputs=%d", len(normalizedStreams))})
+	}
+
+	return &Stream{
+		FFStream: stackedStream,
+	}, canCopy, nil
 }
 
 // cmdOpen implements the 'open' command, not a handler
